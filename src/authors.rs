@@ -1,35 +1,31 @@
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
+
+use anyhow::Context;
 
 use crate::data::Data;
 
-pub fn authors(
-    datafile: &Path,
-    renames: &HashMap<String, String>,
-    hash: Option<String>,
-) -> anyhow::Result<()> {
-    let data = Data::load(datafile)?;
-
-    let Some(hash) = hash.as_ref().or(data.log.first()) else {
-        anyhow::bail!("found no viable hash");
+pub fn authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
+    let hash = match hash {
+        Some(hash) => hash,
+        None => data
+            .load_log()?
+            .first()
+            .cloned()
+            .ok_or(anyhow::anyhow!("found no viable hash"))?,
     };
 
-    let Some(blame) = data.blames.get(hash) else {
-        anyhow::bail!("found no blame for {hash}");
-    };
+    let blame = data
+        .load_blame(&hash)
+        .context(format!("found no blame for {hash}"))?;
+
+    let authors = data.load_authors()?;
 
     let mut count = HashMap::<String, u64>::new();
     for file in blame.0.values() {
-        for (commit, amount) in file {
-            let Some(info) = data.commits.get(commit) else {
-                anyhow::bail!("found no info for {commit}");
-            };
-
-            let author_mail = renames
-                .get(&info.author_mail)
-                .unwrap_or(&info.author_mail)
-                .to_string();
-
-            *count.entry(author_mail).or_default() += amount;
+        for (hash, amount) in file {
+            let info = data.load_commit(hash.clone())?;
+            let author = authors.get(&info.author_mail);
+            *count.entry(author).or_default() += amount;
         }
     }
 

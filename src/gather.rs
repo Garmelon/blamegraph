@@ -12,7 +12,7 @@ use jiff::{
     Timestamp, Zoned,
 };
 
-use crate::data::{Blame, Commit, CommitHash, Data};
+use crate::data::{Blame, Commit, Data};
 
 fn stdout(output: Output) -> anyhow::Result<String> {
     if !output.status.success() {
@@ -23,7 +23,7 @@ fn stdout(output: Output) -> anyhow::Result<String> {
     Ok(stdout)
 }
 
-fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<CommitHash>> {
+fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<String>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -97,7 +97,7 @@ fn parse_author_info(
     Some((name, mail, time))
 }
 
-fn parse_blame_entry(lines: &mut Lines) -> Option<(CommitHash, Option<Commit>)> {
+fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
     let first_line = lines.next()?;
     assert!(!first_line.starts_with('\t'));
     let hash = first_line.split(' ').next().unwrap().to_string();
@@ -148,17 +148,17 @@ fn parse_blame_entry(lines: &mut Lines) -> Option<(CommitHash, Option<Commit>)> 
 }
 
 fn git_blame_file(
+    data: &Data,
     repo: &Path,
-    rev: &str,
+    hash: &str,
     file: &str,
-    commits: &mut HashMap<CommitHash, Commit>,
-) -> anyhow::Result<Option<HashMap<CommitHash, u64>>> {
+) -> anyhow::Result<Option<HashMap<String, u64>>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
         .arg("blame")
         .arg("--porcelain")
-        .arg(rev)
+        .arg(hash)
         .arg("--")
         .arg(file)
         .output()?;
@@ -173,7 +173,7 @@ fn git_blame_file(
     let mut lines = stdout.lines();
     while let Some((hash, commit)) = parse_blame_entry(&mut lines) {
         if let Some(commit) = commit {
-            commits.entry(hash.clone()).or_insert(commit);
+            data.save_commit(&hash, &commit)?;
         }
         *count.entry(hash).or_default() += 1;
     }
@@ -182,42 +182,40 @@ fn git_blame_file(
 }
 
 fn git_blame_commit(
+    data: &Data,
     mp: &MultiProgress,
     repo: &Path,
     rev: &str,
-    commits: &mut HashMap<CommitHash, Commit>,
 ) -> anyhow::Result<Blame> {
     let mut blames = HashMap::new();
 
     let files = git_ls_tree(repo, rev)?;
-    let p_files = ProgressBar::new(files.len().try_into().unwrap())
+    let pb = ProgressBar::new(files.len().try_into().unwrap())
         .with_style(
             ProgressStyle::with_template("{msg:40} {wide_bar} {percent:>3}% [{eta}]").unwrap(),
         )
         .with_message(rev.to_string());
-    let p_files = mp.add(p_files);
+    let pb = mp.add(pb);
 
     for file in files {
-        p_files.inc(1);
-        if let Some(blame) = git_blame_file(repo, rev, &file, commits)? {
+        pb.inc(1);
+        if let Some(blame) = git_blame_file(data, repo, rev, &file)? {
             blames.insert(file, blame);
         }
     }
 
-    p_files.finish_and_clear();
+    pb.finish_and_clear();
     Ok(Blame(blames))
 }
 
-pub fn gather(datafile: &Path, repo: &Path) -> anyhow::Result<()> {
-    let mut data = Data::load(datafile)?;
+pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
+    let log = git_rev_list(repo).context("failed to obtain rev-list")?;
+    data.save_log(&log)?;
 
-    data.log = git_rev_list(repo).context("failed to obtain rev-list")?;
-    data.save(datafile)?;
-
-    let unblamed = data
-        .log
+    let known_blames = data.load_known_blames()?;
+    let unblamed = log
         .iter()
-        .filter(|s| !data.blames.contains_key(*s))
+        .filter(|s| !known_blames.contains(*s))
         .cloned()
         .collect::<Vec<_>>();
 
@@ -226,11 +224,10 @@ pub fn gather(datafile: &Path, repo: &Path) -> anyhow::Result<()> {
         .with_style(ProgressStyle::with_template("Files: {pos}/{len}").unwrap());
     let pb = mp.add(pb);
 
-    for rev in unblamed {
+    for hash in unblamed {
         pb.inc(1);
-        let blame = git_blame_commit(&mp, repo, &rev, &mut data.commits)?;
-        data.blames.insert(rev, blame);
-        data.save(datafile)?;
+        let blame = git_blame_commit(data, &mp, repo, &hash)?;
+        data.save_blame(&hash, &blame)?;
     }
 
     pb.finish();

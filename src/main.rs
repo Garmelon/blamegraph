@@ -2,9 +2,10 @@ mod authors;
 mod data;
 mod gather;
 
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use data::Data;
 
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -14,33 +15,19 @@ enum Command {
 
 #[derive(Debug, Parser)]
 struct Args {
-    datafile: PathBuf,
-
-    #[arg(long = "rename", short = 'r', num_args = 2)]
-    rename: Vec<Vec<String>>,
+    datadir: PathBuf,
 
     #[command(subcommand)]
     cmd: Command,
 }
 
-fn parse_renames(renames: Vec<Vec<String>>) -> HashMap<String, String> {
-    let mut result = HashMap::new();
-    for mut rename in renames {
-        let to = rename.pop().unwrap();
-        let from = rename.pop().unwrap();
-        assert!(rename.is_empty());
-        result.insert(from, to);
-    }
-    result
-}
-
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let renames = parse_renames(args.rename);
+    let mut data = Data::new(args.datadir);
 
     match args.cmd {
-        Command::Gather { repo } => gather::gather(&args.datafile, &repo)?,
-        Command::Authors { hash } => authors::authors(&args.datafile, &renames, hash)?,
+        Command::Gather { repo } => gather::gather(&data, &repo)?,
+        Command::Authors { hash } => authors::authors(&mut data, hash)?,
     }
     Ok(())
 }
