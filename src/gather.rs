@@ -11,6 +11,7 @@ use jiff::{
     tz::{Offset, TimeZone},
     Timestamp, Zoned,
 };
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::data::{Blame, Commit, Data};
 
@@ -185,11 +186,11 @@ fn git_blame_commit(
     data: &Data,
     mp: &MultiProgress,
     repo: &Path,
-    rev: &str,
+    hash: &str,
 ) -> anyhow::Result<Blame> {
     let mut blames = HashMap::new();
 
-    let files = git_ls_tree(repo, rev)?;
+    let files = git_ls_tree(repo, hash)?;
     let pb = ProgressBar::new(files.len().try_into().unwrap())
         .with_style(
             ProgressStyle::with_template("{msg:40} {wide_bar} {percent:>3}% [{eta}]").unwrap(),
@@ -199,7 +200,7 @@ fn git_blame_commit(
 
     for file in files {
         pb.inc(1);
-        if let Some(blame) = git_blame_file(data, repo, rev, &file)? {
+        if let Some(blame) = git_blame_file(data, repo, hash, &file)? {
             blames.insert(file, blame);
         }
     }
@@ -224,12 +225,16 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
         .with_style(ProgressStyle::with_template("Commits: {pos}/{len}").unwrap())
         .with_position((log.len() - unblamed.len()).try_into().unwrap());
     let pb = mp.add(pb);
+    pb.tick();
 
-    for hash in unblamed {
+    unblamed.par_iter().try_for_each(|hash| {
+        let result = match git_blame_commit(data, &mp, repo, hash) {
+            Ok(blame) => data.save_blame(hash, &blame),
+            Err(e) => Err(e),
+        };
         pb.inc(1);
-        let blame = git_blame_commit(data, &mp, repo, &hash)?;
-        data.save_blame(&hash, &blame)?;
-    }
+        result
+    })?;
 
     pb.finish();
 
