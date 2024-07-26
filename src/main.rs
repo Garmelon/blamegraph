@@ -1,4 +1,5 @@
 mod data;
+mod gather;
 
 use std::path::PathBuf;
 
@@ -16,7 +17,10 @@ struct Args {
     cmd: Command,
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    println!("{args:#?}");
+    match args.cmd {
+        Command::Gather { repo } => gather::gather(&args.datafile, &repo)?,
+    }
+    Ok(())
 }
