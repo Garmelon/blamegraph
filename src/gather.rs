@@ -220,8 +220,9 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     let mp = MultiProgress::new();
-    let pb = ProgressBar::new(unblamed.len().try_into().unwrap())
-        .with_style(ProgressStyle::with_template("Files: {pos}/{len}").unwrap());
+    let pb = ProgressBar::new(log.len().try_into().unwrap())
+        .with_style(ProgressStyle::with_template("Commits: {pos}/{len}").unwrap())
+        .with_position((log.len() - unblamed.len()).try_into().unwrap());
     let pb = mp.add(pb);
 
     for hash in unblamed {
