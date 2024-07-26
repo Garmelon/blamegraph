@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use jiff::{
     tz::{Offset, TimeZone},
     Timestamp, Zoned,
@@ -192,10 +192,8 @@ fn git_blame_commit(
 
     let files = git_ls_tree(repo, hash)?;
     let pb = ProgressBar::new(files.len().try_into().unwrap())
-        .with_style(
-            ProgressStyle::with_template("{msg:40} {wide_bar} {percent:>3}% [{eta}]").unwrap(),
-        )
-        .with_message(rev.to_string());
+        .with_style(ProgressStyle::with_template("{msg:40} {bar:36} {percent:>3}%").unwrap())
+        .with_message(hash.to_string());
     let pb = mp.add(pb);
 
     for file in files {
@@ -220,10 +218,11 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
         .cloned()
         .collect::<Vec<_>>();
 
-    let mp = MultiProgress::new();
+    let mp = MultiProgress::with_draw_target(ProgressDrawTarget::stdout_with_hz(5));
+    mp.set_move_cursor(true);
     let pb = ProgressBar::new(log.len().try_into().unwrap())
-        .with_style(ProgressStyle::with_template("Commits: {pos}/{len}").unwrap())
-        .with_position((log.len() - unblamed.len()).try_into().unwrap());
+        .with_position((log.len() - unblamed.len()).try_into().unwrap())
+        .with_style(ProgressStyle::with_template("Commits blamed: {pos}/{len}").unwrap());
     let pb = mp.add(pb);
     pb.tick();
 

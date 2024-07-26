@@ -5,8 +5,13 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.86"
-clap = { version = "4.5.11", features = ["derive", "deprecated", "unstable-v5"] }
-indicatif = "0.17.8"
+clap = { version = "4.5.11", features = [
+    "derive",
+    "deprecated",
+    "unstable-v5",
+] }
+# Contains https://github.com/console-rs/indicatif/pull/648
+indicatif = { git = "https://github.com/console-rs/indicatif.git", rev = "529531726fca07e0a624462838104388e89d029d" }
 jiff = { version = "0.1.1", features = ["serde"] }
 rayon = "1.10.0"
 serde = { version = "1.0.204", features = ["derive"] }
