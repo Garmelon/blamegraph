@@ -9,11 +9,11 @@ pub type CommitHash = String;
 #[derive(Default, Serialize, Deserialize)]
 pub struct Commit {
     pub author: String,
-    pub author_email: String,
-    pub author_date: Zoned,
+    pub author_mail: String,
+    pub author_time: Zoned,
     pub committer: String,
-    pub committer_email: String,
-    pub committer_date: Zoned,
+    pub committer_mail: String,
+    pub committer_time: Zoned,
 }
 
 /// Lines of code per commit for each file.
