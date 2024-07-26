@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.86"
 clap = { version = "4.5.11", features = ["derive", "deprecated", "unstable-v5"] }
+indicatif = "0.17.8"
 jiff = { version = "0.1.1", features = ["serde"] }
 serde = { version = "1.0.204", features = ["derive"] }
 serde_json = "1.0.120"

@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use jiff::{
     tz::{Offset, TimeZone},
     Timestamp, Zoned,
@@ -181,6 +182,7 @@ fn git_blame_file(
 }
 
 fn git_blame_commit(
+    mp: &MultiProgress,
     repo: &Path,
     rev: &str,
     commits: &mut HashMap<CommitHash, Commit>,
@@ -188,18 +190,21 @@ fn git_blame_commit(
     let mut blames = HashMap::new();
 
     let files = git_ls_tree(repo, rev)?;
-    let total = format!("{}", files.len());
-    for (i, file) in files.into_iter().enumerate() {
-        println!(
-            "  - ({n:width$}/{total}) {file}",
-            n = i + 1,
-            width = total.len()
-        );
+    let p_files = ProgressBar::new(files.len().try_into().unwrap())
+        .with_style(
+            ProgressStyle::with_template("{msg:40} {wide_bar} {percent:>3}% [{eta}]").unwrap(),
+        )
+        .with_message(rev.to_string());
+    let p_files = mp.add(p_files);
 
+    for file in files {
+        p_files.inc(1);
         if let Some(blame) = git_blame_file(repo, rev, &file, commits)? {
             blames.insert(file, blame);
         }
     }
+
+    p_files.finish_and_clear();
     Ok(Blame(blames))
 }
 
@@ -216,13 +221,19 @@ pub fn gather(datafile: &Path, repo: &Path) -> anyhow::Result<()> {
         .cloned()
         .collect::<Vec<_>>();
 
-    let total = format!("{}", unblamed.len());
-    for (i, rev) in unblamed.into_iter().enumerate() {
-        println!("({n:width$}/{total}) {rev}", n = i + 1, width = total.len());
-        let blame = git_blame_commit(repo, &rev, &mut data.commits)?;
+    let mp = MultiProgress::new();
+    let pb = ProgressBar::new(unblamed.len().try_into().unwrap())
+        .with_style(ProgressStyle::with_template("Files: {pos}/{len}").unwrap());
+    let pb = mp.add(pb);
+
+    for rev in unblamed {
+        pb.inc(1);
+        let blame = git_blame_commit(&mp, repo, &rev, &mut data.commits)?;
         data.blames.insert(rev, blame);
         data.save(datafile)?;
     }
+
+    pb.finish();
 
     Ok(())
 }
