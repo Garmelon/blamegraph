@@ -155,6 +155,7 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
         counts.push((commit, count));
         pb.inc(1);
     }
+    pb.set_length(pb.position());
     pb.finish();
 
     println!("Crunching numbers");
@@ -251,6 +252,7 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
         counts.push((commit, count));
         pb.inc(1);
     }
+    pb.set_length(pb.position());
     pb.finish();
 
     println!("Crunching numbers");
