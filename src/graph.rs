@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Context;
 use indicatif::{ProgressBar, ProgressStyle};
+use jiff::tz::TimeZone;
 use serde::Serialize;
 use unicode_width::UnicodeWidthStr;
 
@@ -89,6 +90,10 @@ fn first_hash(log: &[Commit], hash: Option<String>) -> anyhow::Result<String> {
 
     anyhow::bail!("found no viable hash");
 }
+
+///////////////
+// By author //
+///////////////
 
 fn count_authors(
     data: &mut Data,
@@ -176,7 +181,102 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     series.reverse();
 
     println!("Saving data");
-    let graph = Graph::new("Authors over time", time, series);
+    let graph = Graph::new("Lines per author", time, series);
+    match format {
+        OutFormat::Html => graph.save_html(outfile)?,
+        OutFormat::Json => graph.save_json(outfile)?,
+    }
+    Ok(())
+}
+
+/////////////
+// By year //
+/////////////
+
+fn count_years(data: &mut Data, tz: &TimeZone, blame: &Blame) -> anyhow::Result<HashMap<i16, u64>> {
+    let mut count = HashMap::<i16, u64>::new();
+    for file in blame.0.values() {
+        for (hash, amount) in file {
+            let info = data.load_commit(hash.clone())?;
+            let year = tz.to_datetime(info.author_time).year();
+            *count.entry(year).or_default() += amount;
+        }
+    }
+    Ok(count)
+}
+
+pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
+    let log = data.load_log()?;
+    let hash = first_hash(&log, hash)?;
+
+    let blame = data
+        .load_blame(&hash)
+        .context(format!("found no blame for {hash}"))?;
+
+    let tz = TimeZone::system();
+
+    let count = count_years(data, &tz, &blame)?;
+    let mut count = count.into_iter().collect::<Vec<_>>();
+    count.sort_unstable();
+
+    for (y, n) in count {
+        let n = format!("{n}");
+        let y = format!("{y:4}");
+        let space = (18 - y.width() - n.width()).max(1);
+        println!("{y} {} {n}", ".".repeat(space));
+    }
+
+    Ok(())
+}
+
+pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
+    println!("Loading log and authors");
+    let mut log = data.load_log()?;
+    log.reverse(); // Now in chronological order
+    let tz = TimeZone::system();
+
+    let pb = ProgressBar::new(log.len().try_into().unwrap())
+        .with_style(ProgressStyle::with_template("Loading blames: {pos}/{len}").unwrap());
+    let mut counts = vec![];
+    for commit in log {
+        let blame = data.load_blame(&commit.hash)?;
+        let count = count_years(data, &tz, &blame)?;
+        counts.push((commit, count));
+        pb.inc(1);
+    }
+    pb.finish();
+
+    println!("Crunching numbers");
+    let all_years = counts
+        .iter()
+        .flat_map(|(_, count)| count.keys().copied())
+        .collect::<HashSet<_>>();
+
+    let min_year = *all_years.iter().min().unwrap();
+    let max_year = *all_years.iter().max().unwrap();
+
+    let mut time = Series::new("Time");
+    let mut by_year = (min_year..=max_year)
+        .map(|year| (year, Series::new(year)))
+        .collect::<HashMap<_, _>>();
+
+    for (commit, count) in &counts {
+        time.push(commit.committer_time.as_second());
+        for year in min_year..=max_year {
+            let amount = count.get(&year).copied().unwrap_or(0);
+            by_year.get_mut(&year).unwrap().push(amount);
+        }
+    }
+
+    let mut series = by_year.into_iter().collect::<Vec<_>>();
+    series.sort_unstable_by_key(|(year, _)| *year);
+    let series = series
+        .into_iter()
+        .map(|(_, series)| series)
+        .collect::<Vec<_>>();
+
+    println!("Saving data");
+    let graph = Graph::new("Lines per year", time, series);
     match format {
         OutFormat::Html => graph.save_html(outfile)?,
         OutFormat::Json => graph.save_json(outfile)?,
