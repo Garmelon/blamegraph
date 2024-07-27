@@ -197,6 +197,7 @@ fn git_blame_commit(
 }
 
 pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
+    println!("Searching for commits to blame");
     let log = git_rev_list(repo).context("failed to obtain rev-list")?;
     data.save_log(&log)?;
 
@@ -212,7 +213,7 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
     mp.set_move_cursor(true);
     let pb = ProgressBar::new(log.len().try_into().unwrap())
         .with_position((log.len() - unblamed.len()).try_into().unwrap())
-        .with_style(ProgressStyle::with_template("Commits blamed: {pos}/{len}").unwrap());
+        .with_style(ProgressStyle::with_template("Blaming commits: {pos}/{len}").unwrap());
     let pb = mp.add(pb);
     pb.tick();
 
