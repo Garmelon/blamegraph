@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use unicode_width::UnicodeWidthStr;
 
 use crate::data::Data;
 
@@ -34,7 +35,7 @@ pub fn authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
 
     for (n, a) in count {
         let n = format!("{n}");
-        let space = (78 - a.len() - n.len()).max(1);
+        let space = (78 - a.width() - n.width()).max(1);
         println!("{a} {} {n}", ".".repeat(space));
     }
 
