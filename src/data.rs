@@ -50,7 +50,7 @@ impl Data {
         let parent = path.parent().unwrap();
         fs::create_dir_all(parent)?;
         let tmp_file = NamedTempFile::new_in(parent)?;
-        serde_json::to_writer_pretty(&tmp_file, value)?;
+        serde_json::to_writer(&tmp_file, value)?;
         tmp_file.persist(path)?;
         Ok(())
     }
