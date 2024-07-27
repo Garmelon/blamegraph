@@ -21,20 +21,37 @@ fn stdout(output: Output) -> anyhow::Result<String> {
     Ok(stdout)
 }
 
-fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<String>> {
+fn parse_rev_list_entry(lines: &mut Lines) -> Option<Commit> {
+    Some(Commit {
+        hash: lines.next()?.to_string(),
+        author: lines.next()?.to_string(),
+        author_mail: lines.next()?.to_string(),
+        author_time: lines.next()?.parse::<Timestamp>().unwrap(),
+        committer: lines.next()?.to_string(),
+        committer_mail: lines.next()?.to_string(),
+        committer_time: lines.next()?.parse::<Timestamp>().unwrap(),
+    })
+}
+
+fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<Commit>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
         .arg("rev-list")
+        .arg("--no-commit-header")
+        .arg("--format=tformat:%H%n%an%n%ae%n%aI%n%cn%n%ce%n%cI")
         .arg("HEAD")
         .output()?;
 
-    let revs = stdout(output)?
-        .lines()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
+    let mut result = vec![];
 
-    Ok(revs)
+    let stdout = stdout(output)?;
+    let mut lines = stdout.lines();
+    while let Some(info) = parse_rev_list_entry(&mut lines) {
+        result.push(info);
+    }
+
+    Ok(result)
 }
 
 fn git_ls_tree(repo: &Path, rev: &str) -> anyhow::Result<Vec<String>> {
@@ -106,6 +123,7 @@ fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
             Some((author, author_mail, author_time)),
             Some((committer, committer_mail, committer_time)),
         ) => Some(Commit {
+            hash: hash.clone(),
             author,
             author_mail,
             author_time,
@@ -185,7 +203,8 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
     let known_blames = data.load_known_blames()?;
     let unblamed = log
         .iter()
-        .filter(|s| !known_blames.contains(*s))
+        .map(|c| &c.hash)
+        .filter(|h| !known_blames.contains(*h))
         .cloned()
         .collect::<Vec<_>>();
 

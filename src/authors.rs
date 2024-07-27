@@ -8,11 +8,13 @@ use crate::data::Data;
 pub fn authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
     let hash = match hash {
         Some(hash) => hash,
-        None => data
-            .load_log()?
-            .first()
-            .cloned()
-            .ok_or(anyhow::anyhow!("found no viable hash"))?,
+        None => {
+            data.load_log()?
+                .into_iter()
+                .next()
+                .ok_or(anyhow::anyhow!("found no viable hash"))?
+                .hash
+        }
     };
 
     let blame = data

@@ -70,17 +70,17 @@ impl Data {
         Ok(authors)
     }
 
-    pub fn load_log(&self) -> anyhow::Result<Vec<String>> {
+    pub fn load_log(&self) -> anyhow::Result<Vec<Commit>> {
         let path = self.dir.join("log.json");
         let log = match fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str::<Vec<String>>(&s)?,
+            Ok(s) => serde_json::from_str::<Vec<Commit>>(&s)?,
             Err(e) if e.kind() == ErrorKind::NotFound => vec![],
             Err(e) => Err(e).context(format!("failed to load log from {}", path.display()))?,
         };
         Ok(log)
     }
 
-    pub fn save_log(&self, log: &Vec<String>) -> anyhow::Result<()> {
+    pub fn save_log(&self, log: &Vec<Commit>) -> anyhow::Result<()> {
         let path = self.dir.join("log.json");
         Self::save_json(&path, log).context(format!("failed to save log to {}", path.display()))
     }
