@@ -1,6 +1,6 @@
-mod authors;
 mod data;
 mod gather;
+mod graph;
 mod years;
 
 use std::path::PathBuf;
@@ -13,6 +13,7 @@ enum Command {
     Gather { repo: PathBuf },
     Authors { hash: Option<String> },
     Years { hash: Option<String> },
+    GraphAuthors { outfile: PathBuf },
 }
 
 #[derive(Debug, Parser)]
@@ -29,8 +30,9 @@ fn main() -> anyhow::Result<()> {
 
     match args.cmd {
         Command::Gather { repo } => gather::gather(&data, &repo)?,
-        Command::Authors { hash } => authors::authors(&mut data, hash)?,
+        Command::Authors { hash } => graph::print_authors(&mut data, hash)?,
         Command::Years { hash } => years::years(&mut data, hash)?,
+        Command::GraphAuthors { outfile } => graph::graph_authors(&mut data, &outfile)?,
     }
     Ok(())
 }
