@@ -7,10 +7,7 @@ use std::{
 
 use anyhow::Context;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use jiff::{
-    tz::{Offset, TimeZone},
-    Timestamp, Zoned,
-};
+use jiff::Timestamp;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::data::{Blame, Commit, Data};
@@ -58,31 +55,11 @@ fn git_ls_tree(repo: &Path, rev: &str) -> anyhow::Result<Vec<String>> {
     Ok(files)
 }
 
-fn parse_tz(tz: &str) -> TimeZone {
-    assert!(tz.len() == 5);
-    assert!(tz.starts_with('+') || tz.starts_with('-'));
-    assert!(tz.chars().skip(1).all(|c| c.is_ascii_digit()));
-
-    let sign = match &tz[..1] {
-        "+" => 1,
-        "-" => -1,
-        _ => unreachable!(),
-    };
-
-    let hours = &tz[1..=2].parse::<i32>().unwrap();
-    let mins = &tz[3..=4].parse::<i32>().unwrap();
-
-    let seconds = sign * (hours * 60 * 60 + mins * 60);
-    let offset = Offset::from_seconds(seconds).unwrap();
-    TimeZone::fixed(offset)
-}
-
 fn parse_author_info(
     name: Option<&str>,
     mail: Option<&str>,
     time: Option<&str>,
-    tz: Option<&str>,
-) -> Option<(String, String, Zoned)> {
+) -> Option<(String, String, Timestamp)> {
     let name = name?.to_string();
 
     let mut mail = mail?;
@@ -91,9 +68,7 @@ fn parse_author_info(
     }
     let mail = mail.to_string();
 
-    let timestamp = Timestamp::from_second(time?.parse::<i64>().unwrap()).unwrap();
-    let tz = parse_tz(tz?);
-    let time = Zoned::new(timestamp, tz);
+    let time = Timestamp::from_second(time?.parse::<i64>().unwrap()).unwrap();
 
     Some((name, mail, time))
 }
@@ -106,11 +81,9 @@ fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
     let mut author = None;
     let mut author_mail = None;
     let mut author_time = None;
-    let mut author_tz = None;
     let mut committer = None;
     let mut committer_mail = None;
     let mut committer_time = None;
-    let mut committer_tz = None;
     for line in lines.by_ref() {
         if line.starts_with("\t") {
             break;
@@ -119,17 +92,15 @@ fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
             Some(("author", info)) => author = Some(info),
             Some(("author-mail", info)) => author_mail = Some(info),
             Some(("author-time", info)) => author_time = Some(info),
-            Some(("author-tz", info)) => author_tz = Some(info),
             Some(("committer", info)) => committer = Some(info),
             Some(("committer-mail", info)) => committer_mail = Some(info),
             Some(("committer-time", info)) => committer_time = Some(info),
-            Some(("committer-tz", info)) => committer_tz = Some(info),
             _ => {} // We're on interested in this header element
         }
     }
 
-    let author = parse_author_info(author, author_mail, author_time, author_tz);
-    let committer = parse_author_info(committer, committer_mail, committer_time, committer_tz);
+    let author = parse_author_info(author, author_mail, author_time);
+    let committer = parse_author_info(committer, committer_mail, committer_time);
     let commit = match (author, committer) {
         (
             Some((author, author_mail, author_time)),

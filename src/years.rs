@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use jiff::tz::TimeZone;
 use unicode_width::UnicodeWidthStr;
 
 use crate::data::Data;
@@ -19,11 +20,15 @@ pub fn years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
         .load_blame(&hash)
         .context(format!("found no blame for {hash}"))?;
 
+    // TODO Add flag to choose time zone manually
+    let tz = TimeZone::system();
+
     let mut count = HashMap::<i16, u64>::new();
     for file in blame.0.values() {
         for (hash, amount) in file {
             let info = data.load_commit(hash.clone())?;
-            *count.entry(info.author_time.year()).or_default() += amount;
+            let year = tz.to_datetime(info.author_time).year();
+            *count.entry(year).or_default() += amount;
         }
     }
 
