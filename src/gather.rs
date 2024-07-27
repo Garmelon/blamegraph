@@ -173,17 +173,14 @@ fn git_blame_file(
 
 fn git_blame_commit(
     data: &Data,
-    mp: &MultiProgress,
+    pb: &ProgressBar,
     repo: &Path,
     hash: &str,
 ) -> anyhow::Result<Blame> {
     let mut blames = HashMap::new();
 
     let files = git_ls_tree(repo, hash)?;
-    let pb = ProgressBar::new(files.len().try_into().unwrap())
-        .with_style(ProgressStyle::with_template("{msg:40} {bar:36} {percent:>3}%").unwrap())
-        .with_message(hash.to_string());
-    let pb = mp.add(pb);
+    pb.set_length(files.len().try_into().unwrap());
 
     for file in files {
         pb.inc(1);
@@ -192,7 +189,6 @@ fn git_blame_commit(
         }
     }
 
-    pb.finish_and_clear();
     Ok(Blame(blames))
 }
 
@@ -218,11 +214,19 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
     pb.tick();
 
     unblamed.iter().par_bridge().try_for_each(|hash| {
-        let result = match git_blame_commit(data, &mp, repo, hash) {
+        let bpb = ProgressBar::new(0)
+            .with_style(ProgressStyle::with_template("{msg:40} {bar:36} {percent:>3}%").unwrap())
+            .with_message(hash.to_string());
+        let bpb = mp.add(bpb);
+
+        let result: Result<(), anyhow::Error> = match git_blame_commit(data, &bpb, repo, hash) {
             Ok(blame) => data.save_blame(hash, &blame),
             Err(e) => Err(e),
         };
+
         pb.inc(1);
+        bpb.finish_and_clear();
+
         result
     })?;
 
