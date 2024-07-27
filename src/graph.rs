@@ -46,7 +46,12 @@ struct Graph {
 }
 
 impl Graph {
-    fn new(title: &str, time: Series, series: Vec<Series>) -> Self {
+    fn new(title: &str, mut time: Series, mut series: Vec<Series>) -> Self {
+        time.values.reverse();
+        for series in &mut series {
+            series.values.reverse();
+        }
+
         Self {
             title: title.to_string(),
             time,
@@ -136,15 +141,16 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
 
 pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading log and authors");
-    let mut log = data.load_log()?;
-    log.reverse(); // Now in chronological order
+    let log = data.load_log()?;
     let authors = data.load_authors()?;
 
     let pb = ProgressBar::new(log.len().try_into().unwrap())
         .with_style(ProgressStyle::with_template("Loading blames: {pos}/{len}").unwrap());
     let mut counts = vec![];
     for commit in log {
-        let blame = data.load_blame(&commit.hash)?;
+        let Ok(blame) = data.load_blame(&commit.hash) else {
+            break;
+        };
         let count = count_authors(data, &authors, &blame)?;
         counts.push((commit, count));
         pb.inc(1);
@@ -231,15 +237,16 @@ pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> 
 
 pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading log and authors");
-    let mut log = data.load_log()?;
-    log.reverse(); // Now in chronological order
+    let log = data.load_log()?;
     let tz = TimeZone::system();
 
     let pb = ProgressBar::new(log.len().try_into().unwrap())
         .with_style(ProgressStyle::with_template("Loading blames: {pos}/{len}").unwrap());
     let mut counts = vec![];
     for commit in log {
-        let blame = data.load_blame(&commit.hash)?;
+        let Ok(blame) = data.load_blame(&commit.hash) else {
+            break;
+        };
         let count = count_years(data, &tz, &blame)?;
         counts.push((commit, count));
         pb.inc(1);
