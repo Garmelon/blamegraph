@@ -9,7 +9,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
 use unicode_width::UnicodeWidthStr;
 
-use crate::data::{Authors, Blame, Commit, Data};
+use crate::{
+    data::{Authors, Blame, Commit, Data},
+    OutFormat,
+};
 
 #[derive(Serialize)]
 struct Series {
@@ -37,20 +40,40 @@ impl Series {
 #[derive(Serialize)]
 struct Graph {
     title: String,
+    time: Series,
     series: Vec<Series>,
 }
 
 impl Graph {
-    fn new(title: &str, series: Vec<Series>) -> Self {
+    fn new(title: &str, time: Series, series: Vec<Series>) -> Self {
         Self {
             title: title.to_string(),
+            time,
             series,
         }
     }
 
-    fn save(&self, path: &Path) -> anyhow::Result<()> {
+    fn save_json(&self, path: &Path) -> anyhow::Result<()> {
         fs::create_dir_all(path.parent().unwrap())?;
         fs::write(path, serde_json::to_vec(self)?)?;
+        Ok(())
+    }
+
+    fn save_html(&self, path: &Path) -> anyhow::Result<()> {
+        const UPLOT_CSS: &str = include_str!("../static/uPlot.css");
+        const UPLOT_JS: &str = include_str!("../static/uPlot.js");
+        const UPLOT_STACK_JS: &str = include_str!("../static/uPlot_stack.js");
+        const GRAPH_TEMPLATE: &str = include_str!("../static/graph_template.html");
+
+        let data = serde_json::to_string(self)?;
+        let html = GRAPH_TEMPLATE
+            .replace("/* replace with uplot css */", UPLOT_CSS)
+            .replace("/* replace with uplot js */", UPLOT_JS)
+            .replace("/* replace with uplot stack js */", UPLOT_STACK_JS)
+            .replace("$replace_with_data$", &data);
+
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(path, html)?;
         Ok(())
     }
 }
@@ -106,7 +129,7 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
     Ok(())
 }
 
-pub fn graph_authors(data: &mut Data, outfile: &Path) -> anyhow::Result<()> {
+pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading log and authors");
     let mut log = data.load_log()?;
     log.reverse(); // Now in chronological order
@@ -151,9 +174,12 @@ pub fn graph_authors(data: &mut Data, outfile: &Path) -> anyhow::Result<()> {
     let mut series = by_author.into_values().collect::<Vec<_>>();
     series.sort_unstable_by_key(|s| total_by_author.get(&s.name).unwrap());
     series.reverse();
-    series.insert(0, time);
 
     println!("Saving data");
-    Graph::new("Authors over time", series).save(outfile)?;
+    let graph = Graph::new("Authors over time", time, series);
+    match format {
+        OutFormat::Html => graph.save_html(outfile)?,
+        OutFormat::Json => graph.save_json(outfile)?,
+    }
     Ok(())
 }

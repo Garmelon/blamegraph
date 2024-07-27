@@ -5,15 +5,32 @@ mod years;
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use data::Data;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum OutFormat {
+    #[default]
+    Html,
+    Json,
+}
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Gather { repo: PathBuf },
-    Authors { hash: Option<String> },
-    Years { hash: Option<String> },
-    GraphAuthors { outfile: PathBuf },
+    Gather {
+        repo: PathBuf,
+    },
+    Authors {
+        hash: Option<String>,
+    },
+    Years {
+        hash: Option<String>,
+    },
+    GraphAuthors {
+        outfile: PathBuf,
+        #[arg(value_enum, default_value_t=Default::default())]
+        format: OutFormat,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -32,7 +49,9 @@ fn main() -> anyhow::Result<()> {
         Command::Gather { repo } => gather::gather(&data, &repo)?,
         Command::Authors { hash } => graph::print_authors(&mut data, hash)?,
         Command::Years { hash } => years::years(&mut data, hash)?,
-        Command::GraphAuthors { outfile } => graph::graph_authors(&mut data, &outfile)?,
+        Command::GraphAuthors { outfile, format } => {
+            graph::graph_authors(&mut data, &outfile, format)?
+        }
     }
     Ok(())
 }

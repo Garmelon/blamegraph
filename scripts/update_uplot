@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+curl 'https://raw.githubusercontent.com/leeoniya/uPlot/master/dist/uPlot.min.css' -o static/uPlot.css
+curl 'https://raw.githubusercontent.com/leeoniya/uPlot/master/dist/uPlot.iife.min.js' -o static/uPlot.js
+curl 'https://raw.githubusercontent.com/leeoniya/uPlot/master/demos/stack.js' -o static/uPlot_stack.js

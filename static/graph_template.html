@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Blamegraph</title>
+    <style>
+        /* replace with uplot css */
+    </style>
+    <script type="module">
+        /* replace with uplot js */
+        /* replace with uplot stack js */
+        const data = $replace_with_data$;
+
+        // https://sashamaps.net/docs/resources/20-colors/
+        // Related: https://en.wikipedia.org/wiki/Help:Distinguishable_colors
+        const colors = [
+            "#e6194B", // Red
+            "#3cb44b", // Green
+            "#ffe119", // Yellow
+            "#4363d8", // Blue
+            "#f58231", // Orange
+            "#911eb4", // Purple
+            "#42d4f4", // Cyan
+            "#f032e6", // Magenta
+            "#bfef45", // Lime
+            "#fabed4", // Pink
+            "#469990", // Teal
+            "#dcbeff", // Lavender
+            "#9A6324", // Brown
+            "#fffac8", // Beige
+            "#800000", // Maroon
+            "#aaffc3", // Mint
+            "#808000", // Olive
+            "#ffd8b1", // Apricot
+            "#000075", // Navy
+            "#a9a9a9", // Grey
+            // "#ffffff", // White
+            // "#000000", // Black
+        ];
+        function stroke(i) { return colors[i % colors.length]; }
+        function fill(i) { return `${stroke(i)}80`; }
+
+        let series = data.series.map((s, i) => ({
+            label: s.name,
+            stroke: stroke(i),
+            fill: fill(i),
+            value: (p, v, i, x) => data.series[i - 1].values[x],
+        }));
+
+        let stacked = getStackedOpts(
+            data.title,
+            [{}].concat(series),
+            [data.time.values].concat(data.series.map(s => s.values)),
+        );
+
+        stacked.opts.title = data.title;
+        stacked.opts.width = 800;
+        stacked.opts.height = 600;
+        stacked.opts.scales.x.time = true;
+        stacked.opts.axes = [
+            {},
+            { values: (p, s, i, f) => s.map(v => `${Math.round(v / 1000)}k`) },
+        ];
+        console.log(stacked.opts);
+
+        let plot = new uPlot(stacked.opts, stacked.data, document.body);
+    </script>
+</head>
+
+<body>
+</body>
+
+</html>
