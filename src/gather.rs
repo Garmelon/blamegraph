@@ -8,7 +8,7 @@ use std::{
 use anyhow::Context;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use jiff::Timestamp;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{ParallelBridge, ParallelIterator};
 
 use crate::data::{Blame, Commit, Data};
 
@@ -217,7 +217,7 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
     let pb = mp.add(pb);
     pb.tick();
 
-    unblamed.par_iter().try_for_each(|hash| {
+    unblamed.iter().par_bridge().try_for_each(|hash| {
         let result = match git_blame_commit(data, &mp, repo, hash) {
             Ok(blame) => data.save_blame(hash, &blame),
             Err(e) => Err(e),
