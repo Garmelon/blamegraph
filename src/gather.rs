@@ -30,6 +30,7 @@ fn parse_rev_list_entry(lines: &mut Lines) -> Option<Commit> {
         committer: lines.next()?.to_string(),
         committer_mail: lines.next()?.to_string(),
         committer_time: lines.next()?.parse::<Timestamp>().unwrap(),
+        subject: lines.next()?.to_string(),
     })
 }
 
@@ -39,7 +40,7 @@ fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<Commit>> {
         .arg(repo)
         .arg("rev-list")
         .arg("--no-commit-header")
-        .arg("--format=tformat:%H%n%an%n%ae%n%aI%n%cn%n%ce%n%cI")
+        .arg("--format=tformat:%H%n%an%n%ae%n%aI%n%cn%n%ce%n%cI%n%s")
         .arg("HEAD")
         .output()?;
 
@@ -101,6 +102,7 @@ fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
     let mut committer = None;
     let mut committer_mail = None;
     let mut committer_time = None;
+    let mut summary = None;
     for line in lines.by_ref() {
         if line.starts_with("\t") {
             break;
@@ -112,16 +114,18 @@ fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
             Some(("committer", info)) => committer = Some(info),
             Some(("committer-mail", info)) => committer_mail = Some(info),
             Some(("committer-time", info)) => committer_time = Some(info),
+            Some(("summary", info)) => summary = Some(info),
             _ => {} // We're on interested in this header element
         }
     }
 
     let author = parse_author_info(author, author_mail, author_time);
     let committer = parse_author_info(committer, committer_mail, committer_time);
-    let commit = match (author, committer) {
+    let commit = match (author, committer, summary) {
         (
             Some((author, author_mail, author_time)),
             Some((committer, committer_mail, committer_time)),
+            Some(summary),
         ) => Some(Commit {
             hash: hash.clone(),
             author,
@@ -130,6 +134,7 @@ fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
             committer,
             committer_mail,
             committer_time,
+            subject: summary.to_string(),
         }),
         _ => None,
     };

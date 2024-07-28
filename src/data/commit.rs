@@ -10,4 +10,5 @@ pub struct Commit {
     pub committer: String,
     pub committer_mail: String,
     pub committer_time: Timestamp,
+    pub subject: String,
 }
