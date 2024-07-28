@@ -41,12 +41,19 @@ impl Series {
 #[derive(Serialize)]
 struct Graph {
     title: String,
+    commits: Vec<Commit>,
     time: Series,
     series: Vec<Series>,
 }
 
 impl Graph {
-    fn new(title: &str, mut time: Series, mut series: Vec<Series>) -> Self {
+    fn new(
+        title: &str,
+        mut commits: Vec<Commit>,
+        mut time: Series,
+        mut series: Vec<Series>,
+    ) -> Self {
+        commits.reverse();
         time.values.reverse();
         for series in &mut series {
             series.values.reverse();
@@ -54,6 +61,7 @@ impl Graph {
 
         Self {
             title: title.to_string(),
+            commits,
             time,
             series,
         }
@@ -161,21 +169,23 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     println!("Crunching numbers");
     let all_authors = counts
         .iter()
-        .flat_map(|(_, count)| count.keys())
+        .flat_map(|(_, count)| count.keys().cloned())
         .collect::<HashSet<_>>();
 
+    let mut commits = vec![];
     let mut time = Series::new("Time");
     let mut by_author = all_authors
         .iter()
-        .map(|author| (*author, Series::new(author)))
+        .map(|author| (author, Series::new(author)))
         .collect::<HashMap<_, _>>();
 
-    for (commit, count) in &counts {
-        time.push(commit.committer_time.as_second());
+    for (commit, count) in counts {
         for author in &all_authors {
-            let amount = count.get(*author).copied().unwrap_or(0);
+            let amount = count.get(author).copied().unwrap_or(0);
             by_author.get_mut(author).unwrap().push(amount);
         }
+        time.push(commit.committer_time.as_second());
+        commits.push(commit);
     }
 
     let total_by_author = by_author
@@ -188,7 +198,7 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     series.reverse();
 
     println!("Saving data");
-    let graph = Graph::new("Lines per author", time, series);
+    let graph = Graph::new("Lines per author", commits, time, series);
     match format {
         OutFormat::Html => graph.save_html(outfile)?,
         OutFormat::Json => graph.save_json(outfile)?,
@@ -264,17 +274,19 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
     let min_year = *all_years.iter().min().unwrap();
     let max_year = *all_years.iter().max().unwrap();
 
+    let mut commits = vec![];
     let mut time = Series::new("Time");
     let mut by_year = (min_year..=max_year)
         .map(|year| (year, Series::new(year)))
         .collect::<HashMap<_, _>>();
 
-    for (commit, count) in &counts {
-        time.push(commit.committer_time.as_second());
+    for (commit, count) in counts {
         for year in min_year..=max_year {
             let amount = count.get(&year).copied().unwrap_or(0);
             by_year.get_mut(&year).unwrap().push(amount);
         }
+        time.push(commit.committer_time.as_second());
+        commits.push(commit)
     }
 
     let mut series = by_year.into_iter().collect::<Vec<_>>();
@@ -285,7 +297,7 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
         .collect::<Vec<_>>();
 
     println!("Saving data");
-    let graph = Graph::new("Lines per year", time, series);
+    let graph = Graph::new("Lines per year", commits, time, series);
     match format {
         OutFormat::Html => graph.save_html(outfile)?,
         OutFormat::Json => graph.save_json(outfile)?,

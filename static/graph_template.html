@@ -7,11 +7,36 @@
     <title>Blamegraph</title>
     <style>
         /* replace with uplot css */
+
+        body {
+            display: flex;
+        }
+
+        .infos {
+            display: flex;
+            flex-direction: column;
+        }
     </style>
     <script type="module">
         /* replace with uplot js */
         /* replace with uplot stack js */
         const data = $replace_with_data$;
+
+        const plot = document.getElementById("plot");
+        const info = document.getElementById("info");
+        const info2 = document.getElementById("info2");
+
+        function formatCommit(idx) {
+            let c = data.commits[idx];
+            return (
+                `commit ${c.hash}`
+                + `\nAuthor:         ${c.author} <${c.author_mail}>`
+                + `\nAuthor Date:    ${new Date(c.author_time).toLocaleString()}`
+                + `\nCommitter:      ${c.committer} <${c.committer_mail}>`
+                + `\nCommitter Date: ${new Date(c.committer_time).toLocaleString()}`
+                + `\n\n${c.subject}`
+            );
+        }
 
         // https://sashamaps.net/docs/resources/20-colors/
         // Related: https://en.wikipedia.org/wiki/Help:Distinguishable_colors
@@ -63,13 +88,42 @@
             {},
             { values: (p, s, i, f) => s.map(v => `${Math.round(v / 1000)}k`) },
         ];
-        console.log(stacked.opts);
 
-        let plot = new uPlot(stacked.opts, stacked.data, document.body);
+        // Update commit infos
+        let lastX = null;
+        let lastY = null;
+        let lastIdx = null;
+        stacked.opts.hooks.setCursor = [u => {
+            let idx = u.cursor.idx;
+            if (idx === null) {
+                info.textContent = "none";
+            } else {
+                info.textContent = formatCommit(idx);
+            }
+            lastIdx = idx;
+        }];
+
+        let u = new uPlot(stacked.opts, stacked.data, plot);
+        u.over.addEventListener("mousedown", e => {
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+        u.over.addEventListener("mouseup", e => {
+            if (lastIdx !== null && e.clientX === lastX && e.clientY === lastY) {
+                info2.textContent = formatCommit(lastIdx);
+            }
+        });
     </script>
 </head>
 
 <body>
+    <div id="plot"></div>
+    <div class="infos">
+        <h2>Hovered commit</h2>
+        <pre id="info">none</pre>
+        <h2>Clicked commit</h2>
+        <pre id="info2">none</pre>
+    </div>
 </body>
 
 </html>
