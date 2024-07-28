@@ -1,12 +1,16 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt, fs,
     path::Path,
 };
 
 use anyhow::Context;
 use indicatif::{ProgressBar, ProgressStyle};
-use jiff::tz::TimeZone;
+use jiff::{
+    civil::{Date, Time},
+    tz::TimeZone,
+    Timestamp, ToSpan,
+};
 use serde::Serialize;
 use unicode_width::UnicodeWidthStr;
 
@@ -42,7 +46,7 @@ impl Series {
 struct Graph {
     title: String,
     commits: Vec<Commit>,
-    time: Series,
+    time: Vec<i64>,
     series: Vec<Series>,
 }
 
@@ -50,11 +54,11 @@ impl Graph {
     fn new(
         title: &str,
         mut commits: Vec<Commit>,
-        mut time: Series,
+        mut time: Vec<i64>,
         mut series: Vec<Series>,
     ) -> Self {
         commits.reverse();
-        time.values.reverse();
+        time.reverse();
         for series in &mut series {
             series.values.reverse();
         }
@@ -64,6 +68,36 @@ impl Graph {
             commits,
             time,
             series,
+        }
+    }
+
+    fn make_day_equidistant(&mut self, tz: TimeZone) {
+        let seconds_per_day = 24 * 60 * 60;
+
+        let is_sorted = self
+            .time
+            .iter()
+            .zip(self.time.iter().skip(1))
+            .all(|(a, b)| a <= b);
+        assert!(is_sorted, "time must be monotonically increasing");
+
+        let mut commits_by_date = BTreeMap::<Date, u32>::new();
+        for time in &self.time {
+            let time = Timestamp::from_second(*time).unwrap();
+            let date = tz.to_datetime(time).date();
+            *commits_by_date.entry(date).or_default() += 1;
+        }
+
+        self.time.clear();
+        for (date, amount) in commits_by_date {
+            let amount: i64 = amount.into();
+            let seconds_per_commit = seconds_per_day / amount;
+            for n in 0..amount {
+                let seconds = seconds_per_commit * n + seconds_per_commit / 2;
+                let time = Time::midnight() + seconds.seconds();
+                let time = tz.to_timestamp(date.to_datetime(time)).unwrap().as_second();
+                self.time.push(time)
+            }
         }
     }
 
@@ -150,6 +184,7 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
 pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading log and authors");
     let log = data.load_log()?;
+    let tz = TimeZone::system();
     let authors = data.load_authors()?;
 
     let pb = ProgressBar::new(log.len().try_into().unwrap())
@@ -173,7 +208,7 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
         .collect::<HashSet<_>>();
 
     let mut commits = vec![];
-    let mut time = Series::new("Time");
+    let mut time = vec![];
     let mut by_author = all_authors
         .iter()
         .map(|author| (author, Series::new(author)))
@@ -198,7 +233,8 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     series.reverse();
 
     println!("Saving data");
-    let graph = Graph::new("Lines per author", commits, time, series);
+    let mut graph = Graph::new("Lines per author", commits, time, series);
+    graph.make_day_equidistant(tz);
     match format {
         OutFormat::Html => graph.save_html(outfile)?,
         OutFormat::Json => graph.save_json(outfile)?,
@@ -275,7 +311,7 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
     let max_year = *all_years.iter().max().unwrap();
 
     let mut commits = vec![];
-    let mut time = Series::new("Time");
+    let mut time = vec![];
     let mut by_year = (min_year..=max_year)
         .map(|year| (year, Series::new(year)))
         .collect::<HashMap<_, _>>();
@@ -297,7 +333,8 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
         .collect::<Vec<_>>();
 
     println!("Saving data");
-    let graph = Graph::new("Lines per year", commits, time, series);
+    let mut graph = Graph::new("Lines per year", commits, time, series);
+    graph.make_day_equidistant(tz);
     match format {
         OutFormat::Html => graph.save_html(outfile)?,
         OutFormat::Json => graph.save_json(outfile)?,

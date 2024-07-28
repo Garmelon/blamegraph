@@ -77,7 +77,7 @@
         let stacked = getStackedOpts(
             data.title,
             [{}].concat(series),
-            [data.time.values].concat(data.series.map(s => s.values)),
+            [data.time].concat(data.series.map(s => s.values)),
         );
 
         stacked.opts.title = data.title;
