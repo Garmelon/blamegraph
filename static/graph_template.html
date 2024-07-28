@@ -71,6 +71,7 @@
             label: s.name,
             stroke: stroke(i),
             fill: fill(i),
+            paths: uPlot.paths.stepped({ align: 1 }),
             value: (p, v, i, x) => data.series[i - 1].values[x],
         }));
 
