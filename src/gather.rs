@@ -39,6 +39,7 @@ fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<Commit>> {
         .arg("-C")
         .arg(repo)
         .arg("rev-list")
+        .arg("--date-order")
         .arg("--no-commit-header")
         .arg("--format=tformat:%H%n%an%n%ae%n%aI%n%cn%n%ce%n%cI%n%s")
         .arg("HEAD")
@@ -51,6 +52,12 @@ fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<Commit>> {
     while let Some(info) = parse_rev_list_entry(&mut lines) {
         result.push(info);
     }
+
+    // Stable sort so we keep the --date-order for subsequent commits with the
+    // same committer time.
+    result.reverse();
+    result.sort_by_key(|c| c.committer_time);
+    result.reverse();
 
     Ok(result)
 }
