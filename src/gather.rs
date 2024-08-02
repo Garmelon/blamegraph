@@ -24,6 +24,12 @@ fn stdout(output: Output) -> anyhow::Result<String> {
 fn parse_rev_list_entry(lines: &mut Lines) -> Option<Commit> {
     Some(Commit {
         hash: lines.next()?.to_string(),
+        parents: lines
+            .next()?
+            .split(" ")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>(),
         author: lines.next()?.to_string(),
         author_mail: lines.next()?.to_string(),
         author_time: lines.next()?.parse::<Timestamp>().unwrap(),
@@ -41,7 +47,7 @@ fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<Commit>> {
         .arg("rev-list")
         .arg("--date-order")
         .arg("--no-commit-header")
-        .arg("--format=tformat:%H%n%an%n%ae%n%aI%n%cn%n%ce%n%cI%n%s")
+        .arg("--format=tformat:%H%n%P%n%an%n%ae%n%aI%n%cn%n%ce%n%cI%n%s")
         .arg("HEAD")
         .output()?;
 
