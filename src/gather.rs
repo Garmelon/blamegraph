@@ -80,77 +80,24 @@ fn git_ls_tree(repo: &Path, rev: &str) -> anyhow::Result<Vec<String>> {
     Ok(files)
 }
 
-fn parse_author_info(
-    name: Option<&str>,
-    mail: Option<&str>,
-    time: Option<&str>,
-) -> Option<(String, String, Timestamp)> {
-    let name = name?.to_string();
-
-    let mut mail = mail?;
-    if mail.starts_with('<') && mail.ends_with('>') {
-        mail = mail.strip_prefix('<').unwrap().strip_suffix('>').unwrap();
-    }
-    let mail = mail.to_string();
-
-    let time = Timestamp::from_second(time?.parse::<i64>().unwrap()).unwrap();
-
-    Some((name, mail, time))
-}
-
-fn parse_blame_entry(lines: &mut Lines) -> Option<(String, Option<Commit>)> {
+fn parse_blame_entry(lines: &mut Lines) -> Option<String> {
     let first_line = lines.next()?;
     assert!(!first_line.starts_with('\t'));
-    let hash = first_line.split(' ').next().unwrap().to_string();
 
-    let mut author = None;
-    let mut author_mail = None;
-    let mut author_time = None;
-    let mut committer = None;
-    let mut committer_mail = None;
-    let mut committer_time = None;
-    let mut summary = None;
+    let hash = first_line.split(' ').next().unwrap().to_string();
+    assert!(hash.len() == 40);
+
+    // Skip remaining header lines and the line from the file
     for line in lines.by_ref() {
-        if line.starts_with("\t") {
+        if line.starts_with('\t') {
             break;
-        }
-        match line.split_once(' ') {
-            Some(("author", info)) => author = Some(info),
-            Some(("author-mail", info)) => author_mail = Some(info),
-            Some(("author-time", info)) => author_time = Some(info),
-            Some(("committer", info)) => committer = Some(info),
-            Some(("committer-mail", info)) => committer_mail = Some(info),
-            Some(("committer-time", info)) => committer_time = Some(info),
-            Some(("summary", info)) => summary = Some(info),
-            _ => {} // We're on interested in this header element
         }
     }
 
-    let author = parse_author_info(author, author_mail, author_time);
-    let committer = parse_author_info(committer, committer_mail, committer_time);
-    let commit = match (author, committer, summary) {
-        (
-            Some((author, author_mail, author_time)),
-            Some((committer, committer_mail, committer_time)),
-            Some(summary),
-        ) => Some(Commit {
-            hash: hash.clone(),
-            author,
-            author_mail,
-            author_time,
-            committer,
-            committer_mail,
-            committer_time,
-            subject: summary.to_string(),
-        }),
-        _ => None,
-    };
-
-    Some((hash, commit))
+    Some(hash)
 }
 
 fn git_blame_file(
-    data: &Data,
     repo: &Path,
     hash: &str,
     file: &str,
@@ -173,22 +120,14 @@ fn git_blame_file(
     let mut count = HashMap::new();
 
     let mut lines = stdout.lines();
-    while let Some((hash, commit)) = parse_blame_entry(&mut lines) {
-        if let Some(commit) = commit {
-            data.save_commit(&hash, &commit)?;
-        }
+    while let Some(hash) = parse_blame_entry(&mut lines) {
         *count.entry(hash).or_default() += 1;
     }
 
     Ok(Some(count))
 }
 
-fn git_blame_commit(
-    data: &Data,
-    pb: &ProgressBar,
-    repo: &Path,
-    hash: &str,
-) -> anyhow::Result<Blame> {
+fn git_blame_commit(pb: &ProgressBar, repo: &Path, hash: &str) -> anyhow::Result<Blame> {
     let mut blames = HashMap::new();
 
     let files = git_ls_tree(repo, hash)?;
@@ -196,7 +135,7 @@ fn git_blame_commit(
 
     for file in files {
         pb.inc(1);
-        if let Some(blame) = git_blame_file(data, repo, hash, &file)? {
+        if let Some(blame) = git_blame_file(repo, hash, &file)? {
             blames.insert(file, blame);
         }
     }
@@ -231,7 +170,7 @@ pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
             .with_message(hash.to_string());
         let bpb = mp.add(bpb);
 
-        let result: Result<(), anyhow::Error> = match git_blame_commit(data, &bpb, repo, hash) {
+        let result: Result<(), anyhow::Error> = match git_blame_commit(&bpb, repo, hash) {
             Ok(blame) => data.save_blame(hash, &blame),
             Err(e) => Err(e),
         };
