@@ -13,6 +13,7 @@ clap = { version = "4.5.11", features = [
 # Contains https://github.com/console-rs/indicatif/pull/648
 indicatif = { git = "https://github.com/console-rs/indicatif.git", rev = "529531726fca07e0a624462838104388e89d029d" }
 jiff = { version = "0.1.1", features = ["serde"] }
+lru = "0.12.4"
 rayon = "1.10.0"
 serde = { version = "1.0.204", features = ["derive"] }
 serde_json = "1.0.120"

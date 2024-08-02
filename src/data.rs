@@ -16,13 +16,13 @@ mod blame;
 mod commit;
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
 };
 
 use anyhow::Context;
+use lru::LruCache;
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
 
@@ -50,18 +50,18 @@ fn path_blame(dir: &Path, hash: &str) -> PathBuf {
 
 pub struct Data {
     dir: PathBuf,
-    commit_cache: HashMap<String, Commit>,
-    blametree_cache: HashMap<String, BlameTree>,
-    blame_cache: HashMap<String, Blame>,
+    commit_cache: LruCache<String, Commit>,
+    blametree_cache: LruCache<String, BlameTree>,
+    blame_cache: LruCache<String, Blame>,
 }
 
 impl Data {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
-            commit_cache: HashMap::new(),
-            blametree_cache: HashMap::new(),
-            blame_cache: HashMap::new(),
+            commit_cache: LruCache::new(10000.try_into().unwrap()),
+            blametree_cache: LruCache::new(1000.try_into().unwrap()),
+            blame_cache: LruCache::new(5000.try_into().unwrap()),
         }
     }
 
@@ -70,19 +70,18 @@ impl Data {
     }
 
     fn load_json_with_cache<T: Clone + DeserializeOwned>(
-        cache: &mut HashMap<String, T>,
+        cache: &mut LruCache<String, T>,
         path: &Path,
         key: String,
     ) -> anyhow::Result<T> {
-        match cache.entry(key) {
-            Entry::Occupied(entry) => Ok(entry.get().clone()),
-            Entry::Vacant(entry) => {
-                let value = Self::load_json::<T>(path)
-                    .context(format!("failed to load {}", path.display()))?;
-                entry.insert(value.clone());
-                Ok(value)
-            }
+        if let Some(value) = cache.get(&key) {
+            return Ok(value.clone());
         }
+
+        let value =
+            Self::load_json::<T>(path).context(format!("failed to load {}", path.display()))?;
+        cache.push(key, value.clone());
+        Ok(value)
     }
 
     fn save_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
@@ -139,6 +138,10 @@ impl Data {
     pub fn save_commit(&self, commit: &Commit) -> anyhow::Result<()> {
         let path = path_commit(&self.dir, &commit.hash);
         Self::save_json_without_overwriting(&path, commit)
+    }
+
+    pub fn blametree_exists(&self, hash: String) -> bool {
+        path_blametree(&self.dir, &hash).exists()
     }
 
     pub fn load_blametree(&mut self, hash: String) -> anyhow::Result<BlameTree> {

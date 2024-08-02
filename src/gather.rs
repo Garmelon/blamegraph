@@ -90,14 +90,9 @@ fn compute_blametrees(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyho
     // In topological order from parent to child, to ensure the blametrees of
     // all parents already exist when we get to a commit.
     for commit in commits.iter().rev() {
-        if data.load_blametree(commit.hash.clone()).is_ok() {
+        if data.blametree_exists(commit.hash.clone()) {
             pb.inc(1);
             continue;
-        }
-
-        let mut parents = vec![];
-        for hash in &commit.parents {
-            parents.push(data.load_blametree(hash.clone())?);
         }
 
         let blametree = compute_blametree(data, repo, commit)?;
