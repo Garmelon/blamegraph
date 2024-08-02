@@ -62,8 +62,8 @@ impl Data {
         Self {
             dir,
             commit_cache: LruCache::new(10000.try_into().unwrap()),
-            blametree_cache: LruCache::new(1000.try_into().unwrap()),
-            blame_cache: LruCache::new(5000.try_into().unwrap()),
+            blametree_cache: LruCache::new(100.try_into().unwrap()),
+            blame_cache: LruCache::new(10000.try_into().unwrap()),
         }
     }
 
