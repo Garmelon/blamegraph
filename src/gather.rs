@@ -59,9 +59,9 @@ fn find_blame_commit(
 fn compute_blametree(data: &mut Data, repo: &Path, commit: &Commit) -> anyhow::Result<BlameTree> {
     let mut parents = vec![];
     for hash in &commit.parents {
-        let bt = data.load_blametree(hash.clone())?;
-        let (_, blames) = bt.destruct();
-        let by_path_and_blob = blames
+        let by_path_and_blob = data
+            .load_blametree(hash.clone())?
+            .blames
             .into_iter()
             .map(|b| ((b.path, b.blob), b.commit))
             .collect::<HashMap<_, _>>();
@@ -78,7 +78,10 @@ fn compute_blametree(data: &mut Data, repo: &Path, commit: &Commit) -> anyhow::R
         blames.push(BlameId { commit, blob, path });
     }
 
-    Ok(BlameTree::new(commit.hash.clone(), blames))
+    Ok(BlameTree {
+        commit: commit.hash.clone(),
+        blames,
+    })
 }
 
 fn compute_blametrees(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyhow::Result<()> {
@@ -108,10 +111,12 @@ fn compute_blames_for_blametree(
     computed: Arc<Mutex<HashSet<BlameId>>>,
     blametree: BlameTree,
 ) -> anyhow::Result<()> {
-    let (bt_commit, blames) = blametree.destruct();
-    let pb = mp.add(progress::commit_blame_bar(&bt_commit, blames.len()));
+    let pb = mp.add(progress::commit_blame_bar(
+        &blametree.commit,
+        blametree.blames.len(),
+    ));
 
-    for blame_id in blames {
+    for blame_id in blametree.blames {
         if !computed.lock().unwrap().insert(blame_id.clone()) {
             pb.inc(1);
             continue;
@@ -122,7 +127,7 @@ fn compute_blames_for_blametree(
             continue;
         }
 
-        let lines_by_commit = git::git_blame(repo, &bt_commit, &blame_id.path)?;
+        let lines_by_commit = git::git_blame(repo, &blametree.commit, &blame_id.path)?;
         data.save_blame(&Blame {
             id: blame_id,
             lines_by_commit,

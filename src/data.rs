@@ -13,7 +13,6 @@
 
 mod authors;
 mod blame;
-mod blametree;
 mod commit;
 
 use std::{
@@ -27,26 +26,28 @@ use lru::LruCache;
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
 
-pub use self::{authors::*, blame::*, blametree::*, commit::*};
+pub use self::{authors::*, blame::*, commit::*};
+
+const EXTENSION: &str = "bin";
 
 fn path_authors(dir: &Path) -> PathBuf {
     dir.join("authors.toml")
 }
 
 fn path_log(dir: &Path) -> PathBuf {
-    dir.join("log.json")
+    dir.join("log").with_extension(EXTENSION)
 }
 
 fn path_commit(dir: &Path, hash: &str) -> PathBuf {
-    dir.join("commits").join(hash).with_extension("json")
+    dir.join("commits").join(hash).with_extension(EXTENSION)
 }
 
 fn path_blametree(dir: &Path, hash: &str) -> PathBuf {
-    dir.join("blametrees").join(hash).with_extension("json")
+    dir.join("blametrees").join(hash).with_extension(EXTENSION)
 }
 
 fn path_blame(dir: &Path, hash: &str) -> PathBuf {
-    dir.join("blames").join(hash).with_extension("json")
+    dir.join("blames").join(hash).with_extension(EXTENSION)
 }
 
 pub struct Data {
@@ -66,11 +67,11 @@ impl Data {
         }
     }
 
-    fn load_json<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
-        Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+    fn load_data<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+        Ok(bincode::deserialize(&fs::read(path)?)?)
     }
 
-    fn load_json_with_cache<T: Clone + DeserializeOwned>(
+    fn load_data_with_cache<T: Clone + DeserializeOwned>(
         cache: &mut LruCache<String, T>,
         path: &Path,
         key: String,
@@ -80,25 +81,25 @@ impl Data {
         }
 
         let value =
-            Self::load_json::<T>(path).context(format!("failed to load {}", path.display()))?;
+            Self::load_data::<T>(path).context(format!("failed to load {}", path.display()))?;
         cache.push(key, value.clone());
         Ok(value)
     }
 
-    fn save_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
+    fn save_data<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
         let parent = path.parent().unwrap();
         fs::create_dir_all(parent)?;
         let tmp_file = NamedTempFile::new_in(parent)?;
-        serde_json::to_writer(&tmp_file, value)?;
+        bincode::serialize_into(&tmp_file, value)?;
         tmp_file.persist(path)?;
         Ok(())
     }
 
-    fn save_json_without_overwriting<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
+    fn save_data_without_overwriting<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
         if path.exists() {
             return Ok(());
         }
-        Self::save_json(path, value)
+        Self::save_data(path, value)
     }
 
     pub fn load_ignore() -> anyhow::Result<()> {
@@ -118,8 +119,8 @@ impl Data {
 
     pub fn load_log(&self) -> anyhow::Result<Vec<String>> {
         let path = path_log(&self.dir);
-        let log = match fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str::<Vec<String>>(&s)?,
+        let log = match fs::read(&path) {
+            Ok(s) => bincode::deserialize::<Vec<String>>(&s)?,
             Err(e) if e.kind() == ErrorKind::NotFound => vec![],
             Err(e) => Err(e).context(format!("failed to load log from {}", path.display()))?,
         };
@@ -128,17 +129,17 @@ impl Data {
 
     pub fn save_log(&self, log: &Vec<String>) -> anyhow::Result<()> {
         let path = path_log(&self.dir);
-        Self::save_json(&path, log).context(format!("failed to save log to {}", path.display()))
+        Self::save_data(&path, log).context(format!("failed to save log to {}", path.display()))
     }
 
     pub fn load_commit(&mut self, hash: String) -> anyhow::Result<Commit> {
         let path = path_commit(&self.dir, &hash);
-        Self::load_json_with_cache(&mut self.commit_cache, &path, hash)
+        Self::load_data_with_cache(&mut self.commit_cache, &path, hash)
     }
 
     pub fn save_commit(&self, commit: &Commit) -> anyhow::Result<()> {
         let path = path_commit(&self.dir, &commit.hash);
-        Self::save_json_without_overwriting(&path, commit)
+        Self::save_data_without_overwriting(&path, commit)
     }
 
     pub fn blametree_exists(&self, hash: String) -> bool {
@@ -147,12 +148,12 @@ impl Data {
 
     pub fn load_blametree(&mut self, hash: String) -> anyhow::Result<BlameTree> {
         let path = path_blametree(&self.dir, &hash);
-        Self::load_json_with_cache(&mut self.blametree_cache, &path, hash)
+        Self::load_data_with_cache(&mut self.blametree_cache, &path, hash)
     }
 
     pub fn save_blametree(&self, blametree: &BlameTree) -> anyhow::Result<()> {
         let path = path_blametree(&self.dir, &blametree.commit);
-        Self::save_json_without_overwriting(&path, blametree)
+        Self::save_data_without_overwriting(&path, blametree)
     }
 
     pub fn blame_exists(&self, id: &BlameId) -> bool {
@@ -161,11 +162,11 @@ impl Data {
 
     pub fn load_blame(&mut self, id: &BlameId) -> anyhow::Result<Blame> {
         let path = path_blame(&self.dir, &id.sha256());
-        Self::load_json_with_cache(&mut self.blame_cache, &path, id.sha256())
+        Self::load_data_with_cache(&mut self.blame_cache, &path, id.sha256())
     }
 
     pub fn save_blame(&self, blame: &Blame) -> anyhow::Result<()> {
         let path = path_blame(&self.dir, &blame.id.sha256());
-        Self::save_json_without_overwriting(&path, blame)
+        Self::save_data_without_overwriting(&path, blame)
     }
 }

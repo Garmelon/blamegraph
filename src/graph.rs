@@ -28,8 +28,7 @@ fn count_authors(
     blametree: BlameTree,
 ) -> anyhow::Result<HashMap<String, u64>> {
     let mut count = HashMap::<String, u64>::new();
-    let (_, blames) = blametree.destruct();
-    for blame_id in blames {
+    for blame_id in blametree.blames {
         let blame = data.load_blame(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit(hash.clone())?;
@@ -133,8 +132,7 @@ fn count_years(
     blametree: BlameTree,
 ) -> anyhow::Result<HashMap<i16, u64>> {
     let mut count = HashMap::<i16, u64>::new();
-    let (_, blames) = blametree.destruct();
-    for blame_id in blames {
+    for blame_id in blametree.blames {
         let blame = data.load_blame(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit(hash.clone())?;
