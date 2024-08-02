@@ -52,9 +52,3 @@ pub struct Blame {
     pub id: BlameId,
     pub lines_by_commit: HashMap<String, u64>,
 }
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct BlameTree {
-    pub commit: String,
-    pub blames: Vec<BlameId>,
-}

@@ -13,6 +13,7 @@
 
 mod authors;
 mod blame;
+mod blametree;
 mod commit;
 
 use std::{
@@ -26,7 +27,7 @@ use lru::LruCache;
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
 
-pub use self::{authors::*, blame::*, commit::*};
+pub use self::{authors::*, blame::*, blametree::*, commit::*};
 
 fn path_authors(dir: &Path) -> PathBuf {
     dir.join("authors.toml")

@@ -25,11 +25,12 @@ use crate::{
 fn count_authors(
     data: &mut Data,
     authors: &Authors,
-    blametree: &BlameTree,
+    blametree: BlameTree,
 ) -> anyhow::Result<HashMap<String, u64>> {
     let mut count = HashMap::<String, u64>::new();
-    for blame_id in &blametree.blames {
-        let blame = data.load_blame(blame_id)?;
+    let (_, blames) = blametree.destruct();
+    for blame_id in blames {
+        let blame = data.load_blame(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit(hash.clone())?;
             let author = authors.get(&info.author_mail);
@@ -45,7 +46,7 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
     let blametree = data.load_blametree(hash)?;
     let authors = data.load_authors()?;
 
-    let count = count_authors(data, &authors, &blametree)?;
+    let count = count_authors(data, &authors, blametree)?;
     let mut count = count.into_iter().map(|(a, n)| (n, a)).collect::<Vec<_>>();
     count.sort_unstable();
 
@@ -71,7 +72,7 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     let mut counts = vec![];
     for commit in commits {
         let blametree = data.load_blametree(commit.hash.clone())?;
-        let Ok(count) = count_authors(data, &authors, &blametree) else {
+        let Ok(count) = count_authors(data, &authors, blametree) else {
             break;
         };
         counts.push((commit, count));
@@ -129,11 +130,12 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
 fn count_years(
     data: &mut Data,
     tz: &TimeZone,
-    blametree: &BlameTree,
+    blametree: BlameTree,
 ) -> anyhow::Result<HashMap<i16, u64>> {
     let mut count = HashMap::<i16, u64>::new();
-    for blame_id in &blametree.blames {
-        let blame = data.load_blame(blame_id)?;
+    let (_, blames) = blametree.destruct();
+    for blame_id in blames {
+        let blame = data.load_blame(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit(hash.clone())?;
             let year = tz.to_datetime(info.author_time).year();
@@ -149,7 +151,7 @@ pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> 
     let blametree = data.load_blametree(hash)?;
     let tz = TimeZone::system();
 
-    let count = count_years(data, &tz, &blametree)?;
+    let count = count_years(data, &tz, blametree)?;
     let mut count = count.into_iter().collect::<Vec<_>>();
     count.sort_unstable();
 
@@ -175,7 +177,7 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
     let mut counts = vec![];
     for commit in commits {
         let blametree = data.load_blametree(commit.hash.clone())?;
-        let Ok(count) = count_years(data, &tz, &blametree) else {
+        let Ok(count) = count_years(data, &tz, blametree) else {
             break;
         };
         counts.push((commit, count));
