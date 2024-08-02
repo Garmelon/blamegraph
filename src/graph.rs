@@ -112,6 +112,15 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     series.sort_unstable_by_key(|s| total_by_author.get(&s.name).unwrap());
     series.reverse();
 
+    if series.len() > 50 {
+        let mut misc_authors = series.pop().unwrap();
+        misc_authors.name = "Misc authors".to_string();
+        while series.len() > 49 {
+            misc_authors.add(&series.pop().unwrap());
+        }
+        series.push(misc_authors);
+    }
+
     println!("Saving data");
     let mut graph = Graph::new("Lines per author", commits, time, series);
     graph.make_equidistant(tz);

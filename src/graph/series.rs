@@ -27,4 +27,11 @@ impl Series {
     pub fn reverse(&mut self) {
         self.values.reverse();
     }
+
+    pub fn add(&mut self, other: &Series) {
+        assert!(self.values.len() == other.values.len());
+        for (i, v) in other.values.iter().enumerate() {
+            self.values[i] += v;
+        }
+    }
 }
