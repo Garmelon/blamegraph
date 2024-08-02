@@ -19,6 +19,15 @@ fn stdout(output: Output) -> anyhow::Result<String> {
     Ok(stdout)
 }
 
+fn stdout_lossy(output: Output) -> anyhow::Result<String> {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(anyhow::anyhow!("command exited with {}", output.status)).context(stderr)?;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    Ok(stdout)
+}
+
 fn parse_rev_list_entry(lines: &mut Lines) -> Option<Commit> {
     Some(Commit {
         hash: lines.next()?.to_string(),
@@ -53,7 +62,7 @@ pub fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<Commit>> {
 
     let mut result = vec![];
 
-    let stdout = stdout(output)?;
+    let stdout = stdout_lossy(output)?;
     let mut lines = stdout.lines();
     while let Some(info) = parse_rev_list_entry(&mut lines) {
         result.push(info);
