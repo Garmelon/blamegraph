@@ -1,193 +1,183 @@
+mod git;
+
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::Path,
-    process::{Command, Output},
-    str::Lines,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::Context;
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use jiff::Timestamp;
+use indicatif::{MultiProgress, ProgressDrawTarget};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
-use crate::data::{Blame, Commit, Data};
+use crate::{
+    data::{Blame, BlameId, BlameTree, Commit, Data},
+    progress,
+};
 
-fn stdout(output: Output) -> anyhow::Result<String> {
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        Err(anyhow::anyhow!("command exited with {}", output.status)).context(stderr)?;
-    }
-    let stdout = String::from_utf8(output.stdout).context("failed to decode command output")?;
-    Ok(stdout)
+fn search_for_commits(repo: &Path) -> anyhow::Result<Vec<Commit>> {
+    println!("Searching for commits");
+    git::git_rev_list(repo).context("failed to obtain rev-list")
 }
 
-fn parse_rev_list_entry(lines: &mut Lines) -> Option<Commit> {
-    Some(Commit {
-        hash: lines.next()?.to_string(),
-        parents: lines
-            .next()?
-            .split(" ")
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
-        author: lines.next()?.to_string(),
-        author_mail: lines.next()?.to_string(),
-        author_time: lines.next()?.parse::<Timestamp>().unwrap(),
-        committer: lines.next()?.to_string(),
-        committer_mail: lines.next()?.to_string(),
-        committer_time: lines.next()?.parse::<Timestamp>().unwrap(),
-        subject: lines.next()?.to_string(),
+fn save_commits(data: &Data, commits: &[Commit]) -> anyhow::Result<()> {
+    let pb = progress::counting_bar("Saving commits", commits.len());
+
+    for commit in commits {
+        data.save_commit(commit)?;
+        pb.inc(1);
+    }
+
+    pb.finish();
+    Ok(())
+}
+
+fn save_log(data: &Data, commits: &[Commit]) -> anyhow::Result<()> {
+    println!("Saving log");
+    let log = commits.iter().map(|c| c.hash.clone()).collect::<Vec<_>>();
+    data.save_log(&log)?;
+    Ok(())
+}
+
+/// Find the earliest commit that a blame for this file can be computed in.
+///
+/// Sharing blames across commits has a few subtle edge cases. Simplifying this
+/// logic is probably not possible without a big performance hit.
+fn find_blame_commit(
+    parents: &[HashMap<(String, String), String>],
+    key: &(String, String),
+) -> Option<String> {
+    let mut parents = parents.iter();
+    let commit = parents.next()?.get(key)?;
+    if parents.all(|p| p.get(key) == Some(commit)) {
+        Some(commit.clone())
+    } else {
+        None
+    }
+}
+
+fn compute_blametree(data: &mut Data, repo: &Path, commit: &Commit) -> anyhow::Result<BlameTree> {
+    let mut parents = vec![];
+    for hash in &commit.parents {
+        let bt = data.load_blametree(hash.clone())?;
+        let by_path_and_blob = bt
+            .blames
+            .into_iter()
+            .map(|b| ((b.path, b.blob), b.commit))
+            .collect::<HashMap<_, _>>();
+        parents.push(by_path_and_blob);
+    }
+
+    let mut blames = vec![];
+
+    let files = git::git_ls_tree(repo, &commit.hash)?;
+    for (path, blob) in files {
+        let key = (path, blob);
+        let commit = find_blame_commit(&parents, &key).unwrap_or_else(|| commit.hash.clone());
+        let (path, blob) = key;
+        blames.push(BlameId { commit, blob, path });
+    }
+
+    Ok(BlameTree {
+        commit: commit.hash.clone(),
+        blames,
     })
 }
 
-fn git_rev_list(repo: &Path) -> anyhow::Result<Vec<Commit>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .arg("rev-list")
-        .arg("--date-order")
-        .arg("--no-commit-header")
-        .arg("--format=tformat:%H%n%P%n%an%n%ae%n%aI%n%cn%n%ce%n%cI%n%s")
-        .arg("HEAD")
-        .output()?;
+fn compute_blametrees(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyhow::Result<()> {
+    let pb = progress::counting_bar("Computing blametrees", commits.len());
 
-    let mut result = vec![];
-
-    let stdout = stdout(output)?;
-    let mut lines = stdout.lines();
-    while let Some(info) = parse_rev_list_entry(&mut lines) {
-        result.push(info);
-    }
-
-    // Stable sort so we keep the --date-order for subsequent commits with the
-    // same committer time.
-    result.reverse();
-    result.sort_by_key(|c| c.committer_time);
-    result.reverse();
-
-    Ok(result)
-}
-
-fn git_ls_tree(repo: &Path, rev: &str) -> anyhow::Result<Vec<String>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .arg("ls-tree")
-        .arg("-r")
-        .arg("--name-only")
-        .arg(rev)
-        .output()?;
-
-    let files = stdout(output)?
-        .lines()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-
-    Ok(files)
-}
-
-fn parse_blame_entry(lines: &mut Lines) -> Option<String> {
-    let first_line = lines.next()?;
-    assert!(!first_line.starts_with('\t'));
-
-    let hash = first_line.split(' ').next().unwrap().to_string();
-    assert!(hash.len() == 40);
-
-    // Skip remaining header lines and the line from the file
-    for line in lines.by_ref() {
-        if line.starts_with('\t') {
-            break;
+    // In topological order from parent to child, to ensure the blametrees of
+    // all parents already exist when we get to a commit.
+    for commit in commits.iter().rev() {
+        if data.load_blametree(commit.hash.clone()).is_ok() {
+            pb.inc(1);
+            continue;
         }
-    }
 
-    Some(hash)
-}
-
-fn git_blame_file(
-    repo: &Path,
-    hash: &str,
-    file: &str,
-) -> anyhow::Result<Option<HashMap<String, u64>>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .arg("blame")
-        .arg("--porcelain")
-        .arg(hash)
-        .arg("--")
-        .arg(file)
-        .output()?;
-
-    let Ok(stdout) = stdout(output) else {
-        // Very likely a binary file, just ignore it
-        return Ok(None);
-    };
-
-    let mut count = HashMap::new();
-
-    let mut lines = stdout.lines();
-    while let Some(hash) = parse_blame_entry(&mut lines) {
-        *count.entry(hash).or_default() += 1;
-    }
-
-    Ok(Some(count))
-}
-
-fn git_blame_commit(pb: &ProgressBar, repo: &Path, hash: &str) -> anyhow::Result<Blame> {
-    let mut blames = HashMap::new();
-
-    let files = git_ls_tree(repo, hash)?;
-    pb.set_length(files.len().try_into().unwrap());
-
-    for file in files {
-        pb.inc(1);
-        if let Some(blame) = git_blame_file(repo, hash, &file)? {
-            blames.insert(file, blame);
+        let mut parents = vec![];
+        for hash in &commit.parents {
+            parents.push(data.load_blametree(hash.clone())?);
         }
-    }
 
-    Ok(Blame(blames))
-}
-
-pub fn gather(data: &Data, repo: &Path) -> anyhow::Result<()> {
-    println!("Searching for commits to blame");
-    let log = git_rev_list(repo).context("failed to obtain rev-list")?;
-    data.save_log(&log)?;
-
-    let known_blames = data.load_known_blames()?;
-    let unblamed = log
-        .iter()
-        .map(|c| &c.hash)
-        .filter(|h| !known_blames.contains(*h))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let mp = MultiProgress::with_draw_target(ProgressDrawTarget::stdout_with_hz(5));
-    mp.set_move_cursor(true);
-    let pb = ProgressBar::new(log.len().try_into().unwrap())
-        .with_position((log.len() - unblamed.len()).try_into().unwrap())
-        .with_style(ProgressStyle::with_template("Blaming commits: {pos}/{len}").unwrap());
-    let pb = mp.add(pb);
-    pb.tick();
-
-    unblamed.iter().par_bridge().try_for_each(|hash| {
-        let bpb = ProgressBar::new(0)
-            .with_style(ProgressStyle::with_template("{msg:40} {bar:36} {percent:>3}%").unwrap())
-            .with_message(hash.to_string());
-        let bpb = mp.add(bpb);
-
-        let result: Result<(), anyhow::Error> = match git_blame_commit(&bpb, repo, hash) {
-            Ok(blame) => data.save_blame(hash, &blame),
-            Err(e) => Err(e),
-        };
-
+        let blametree = compute_blametree(data, repo, commit)?;
+        data.save_blametree(&blametree)?;
         pb.inc(1);
-        bpb.finish_and_clear();
-
-        result
-    })?;
+    }
 
     pb.finish();
+    Ok(())
+}
 
+fn compute_blames_for_blametree(
+    data: &Data,
+    repo: &Path,
+    mp: MultiProgress,
+    computed: Arc<Mutex<HashSet<BlameId>>>,
+    blametree: BlameTree,
+) -> anyhow::Result<()> {
+    let pb = mp.add(progress::commit_blame_bar(
+        &blametree.commit,
+        blametree.blames.len(),
+    ));
+
+    for blame_id in blametree.blames {
+        if !computed.lock().unwrap().insert(blame_id.clone()) {
+            pb.inc(1);
+            continue;
+        }
+
+        if data.blame_exists(&blame_id) {
+            pb.inc(1);
+            continue;
+        }
+
+        let lines_by_commit = git::git_blame(repo, &blametree.commit, &blame_id.path)?;
+        data.save_blame(&Blame {
+            id: blame_id,
+            lines_by_commit,
+        })?;
+
+        pb.inc(1);
+    }
+
+    pb.finish_and_clear();
+    Ok(())
+}
+
+fn compute_blames(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyhow::Result<()> {
+    println!();
+    let mp = MultiProgress::with_draw_target(ProgressDrawTarget::stdout_with_hz(5));
+    mp.set_move_cursor(true);
+
+    let pb = mp.add(progress::counting_bar("Computing blames", commits.len()));
+    pb.tick();
+
+    let mut blametrees = vec![];
+    for commit in commits {
+        blametrees.push(data.load_blametree(commit.hash.clone())?);
+    }
+
+    let computed = Arc::new(Mutex::new(HashSet::<BlameId>::new()));
+
+    blametrees
+        .into_iter()
+        .par_bridge()
+        .try_for_each(|blametree| {
+            compute_blames_for_blametree(data, repo, mp.clone(), computed.clone(), blametree)?;
+            pb.inc(1);
+            Ok::<_, anyhow::Error>(())
+        })?;
+
+    pb.finish();
+    Ok(())
+}
+
+pub fn gather(data: &mut Data, repo: &Path) -> anyhow::Result<()> {
+    let commits = search_for_commits(repo)?;
+    save_commits(data, &commits)?;
+    save_log(data, &commits)?;
+    compute_blametrees(data, repo, &commits)?;
+    compute_blames(data, repo, &commits)?;
     Ok(())
 }

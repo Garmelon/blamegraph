@@ -16,10 +16,9 @@ mod blame;
 mod commit;
 
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{hash_map::Entry, HashMap},
     fs,
     io::ErrorKind,
-    os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
 };
 
@@ -27,11 +26,33 @@ use anyhow::Context;
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
 
-pub use self::{authors::Authors, blame::Blame, commit::Commit};
+pub use self::{authors::*, blame::*, commit::*};
+
+fn path_authors(dir: &Path) -> PathBuf {
+    dir.join("authors.toml")
+}
+
+fn path_log(dir: &Path) -> PathBuf {
+    dir.join("log.json")
+}
+
+fn path_commit(dir: &Path, hash: &str) -> PathBuf {
+    dir.join("commits").join(hash).with_extension("json")
+}
+
+fn path_blametree(dir: &Path, hash: &str) -> PathBuf {
+    dir.join("blametrees").join(hash).with_extension("json")
+}
+
+fn path_blame(dir: &Path, hash: &str) -> PathBuf {
+    dir.join("blames").join(hash).with_extension("json")
+}
 
 pub struct Data {
     dir: PathBuf,
     commit_cache: HashMap<String, Commit>,
+    blametree_cache: HashMap<String, BlameTree>,
+    blame_cache: HashMap<String, Blame>,
 }
 
 impl Data {
@@ -39,11 +60,29 @@ impl Data {
         Self {
             dir,
             commit_cache: HashMap::new(),
+            blametree_cache: HashMap::new(),
+            blame_cache: HashMap::new(),
         }
     }
 
     fn load_json<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
         Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+    }
+
+    fn load_json_with_cache<T: Clone + DeserializeOwned>(
+        cache: &mut HashMap<String, T>,
+        path: &Path,
+        key: String,
+    ) -> anyhow::Result<T> {
+        match cache.entry(key) {
+            Entry::Occupied(entry) => Ok(entry.get().clone()),
+            Entry::Vacant(entry) => {
+                let value = Self::load_json::<T>(path)
+                    .context(format!("failed to load {}", path.display()))?;
+                entry.insert(value.clone());
+                Ok(value)
+            }
+        }
     }
 
     fn save_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
@@ -55,12 +94,19 @@ impl Data {
         Ok(())
     }
 
+    fn save_json_without_overwriting<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
+        if path.exists() {
+            return Ok(());
+        }
+        Self::save_json(path, value)
+    }
+
     pub fn load_ignore() -> anyhow::Result<()> {
         todo!()
     }
 
     pub fn load_authors(&self) -> anyhow::Result<Authors> {
-        let path = self.dir.join("authors.toml");
+        let path = path_authors(&self.dir);
         let authors = match fs::read_to_string(&path) {
             Ok(s) => toml::from_str::<Authors>(&s)?,
             Err(e) if e.kind() == ErrorKind::NotFound => Authors::default(),
@@ -70,92 +116,52 @@ impl Data {
         Ok(authors)
     }
 
-    pub fn load_log(&self) -> anyhow::Result<Vec<Commit>> {
-        let path = self.dir.join("log.json");
+    pub fn load_log(&self) -> anyhow::Result<Vec<String>> {
+        let path = path_log(&self.dir);
         let log = match fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str::<Vec<Commit>>(&s)?,
+            Ok(s) => serde_json::from_str::<Vec<String>>(&s)?,
             Err(e) if e.kind() == ErrorKind::NotFound => vec![],
             Err(e) => Err(e).context(format!("failed to load log from {}", path.display()))?,
         };
         Ok(log)
     }
 
-    pub fn save_log(&self, log: &Vec<Commit>) -> anyhow::Result<()> {
-        let path = self.dir.join("log.json");
+    pub fn save_log(&self, log: &Vec<String>) -> anyhow::Result<()> {
+        let path = path_log(&self.dir);
         Self::save_json(&path, log).context(format!("failed to save log to {}", path.display()))
     }
 
     pub fn load_commit(&mut self, hash: String) -> anyhow::Result<Commit> {
-        match self.commit_cache.entry(hash) {
-            Entry::Occupied(entry) => Ok(entry.get().clone()),
-            Entry::Vacant(entry) => {
-                let path = self
-                    .dir
-                    .join("commits")
-                    .join(entry.key())
-                    .with_extension("json");
-
-                let commit = Self::load_json::<Commit>(&path)
-                    .context(format!("failed to load commit from {}", path.display()))?;
-
-                entry.insert(commit.clone());
-                Ok(commit)
-            }
-        }
+        let path = path_commit(&self.dir, &hash);
+        Self::load_json_with_cache(&mut self.commit_cache, &path, hash)
     }
 
-    pub fn save_commit(&self, hash: &str, commit: &Commit) -> anyhow::Result<()> {
-        let path = self.dir.join("commits").join(hash).with_extension("json");
-
-        if path.exists() {
-            // No need to overwrite a perfectly good file. The commit info won't
-            // have changed since the last time we looked at it. After all, it
-            // has the same hash.
-            return Ok(());
-        }
-
-        Self::save_json(&path, commit)
-            .context(format!("failed to save commit to {}", path.display()))
+    pub fn save_commit(&self, commit: &Commit) -> anyhow::Result<()> {
+        let path = path_commit(&self.dir, &commit.hash);
+        Self::save_json_without_overwriting(&path, commit)
     }
 
-    pub fn load_known_blames(&self) -> anyhow::Result<HashSet<String>> {
-        // It doesn't matter if this includes temporary files or other weird
-        // files. It's only used to prevent recalculating a blame that was
-        // already calculated.
-        let mut result = HashSet::new();
-
-        let path = self.dir.join("blames");
-        let entries = match fs::read_dir(&path) {
-            Ok(e) => e,
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(result),
-            Err(e) => Err(e).context(format!("failed to search blames in {}", path.display()))?,
-        };
-
-        for entry in entries {
-            let entry = entry.context(format!("failed to search blames in {}", path.display()))?;
-
-            let file_type = entry
-                .file_type()
-                .context(format!("failed to inspect {}", entry.path().display()))?;
-
-            if file_type.is_file() {
-                let path = entry.path();
-                let name = path.file_stem().unwrap();
-                let name = String::from_utf8_lossy(name.as_bytes()).to_string();
-                result.insert(name);
-            }
-        }
-
-        Ok(result)
+    pub fn load_blametree(&mut self, hash: String) -> anyhow::Result<BlameTree> {
+        let path = path_blametree(&self.dir, &hash);
+        Self::load_json_with_cache(&mut self.blametree_cache, &path, hash)
     }
 
-    pub fn load_blame(&self, hash: &str) -> anyhow::Result<Blame> {
-        let path = self.dir.join("blames").join(hash).with_extension("json");
-        Self::load_json(&path).context(format!("failed to load blame from {}", path.display()))
+    pub fn save_blametree(&self, blametree: &BlameTree) -> anyhow::Result<()> {
+        let path = path_blametree(&self.dir, &blametree.commit);
+        Self::save_json_without_overwriting(&path, blametree)
     }
 
-    pub fn save_blame(&self, hash: &str, blame: &Blame) -> anyhow::Result<()> {
-        let path = self.dir.join("blames").join(hash).with_extension("json");
-        Self::save_json(&path, blame).context(format!("failed to save blame to {}", path.display()))
+    pub fn blame_exists(&self, id: &BlameId) -> bool {
+        path_blame(&self.dir, &id.sha256()).exists()
+    }
+
+    pub fn load_blame(&mut self, id: &BlameId) -> anyhow::Result<Blame> {
+        let path = path_blame(&self.dir, &id.sha256());
+        Self::load_json_with_cache(&mut self.blame_cache, &path, id.sha256())
+    }
+
+    pub fn save_blame(&self, blame: &Blame) -> anyhow::Result<()> {
+        let path = path_blame(&self.dir, &blame.id.sha256());
+        Self::save_json_without_overwriting(&path, blame)
     }
 }

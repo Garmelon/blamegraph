@@ -1,6 +1,7 @@
 mod data;
 mod gather;
 mod graph;
+mod progress;
 
 use std::path::PathBuf;
 
@@ -50,7 +51,7 @@ fn main() -> anyhow::Result<()> {
     let mut data = Data::new(args.datadir);
 
     match args.cmd {
-        Command::Gather { repo } => gather::gather(&data, &repo)?,
+        Command::Gather { repo } => gather::gather(&mut data, &repo)?,
         Command::Authors { hash } => graph::print_authors(&mut data, hash)?,
         Command::Years { hash } => graph::print_years(&mut data, hash)?,
         Command::GraphAuthors { outfile, format } => {
