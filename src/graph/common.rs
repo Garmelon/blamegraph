@@ -24,7 +24,7 @@ pub fn load_commits(data: &mut Data, log: Vec<String>) -> anyhow::Result<Vec<Com
 
     let mut commits = vec![];
     for hash in log {
-        commits.push(data.load_commit(hash)?);
+        commits.push(data.load_commit_cached(hash)?);
         pb.inc(1);
     }
 

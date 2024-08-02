@@ -60,7 +60,7 @@ fn compute_blametree(data: &mut Data, repo: &Path, commit: &Commit) -> anyhow::R
     let mut parents = vec![];
     for hash in &commit.parents {
         let by_path_and_blob = data
-            .load_blametree(hash.clone())?
+            .load_blametree_cached(hash.clone())?
             .blames
             .into_iter()
             .map(|b| ((b.path, b.blob), b.commit))
@@ -148,21 +148,14 @@ fn compute_blames(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyhow::R
     let pb = mp.add(progress::counting_bar("Computing blames", commits.len()));
     pb.tick();
 
-    let mut blametrees = vec![];
-    for commit in commits {
-        blametrees.push(data.load_blametree(commit.hash.clone())?);
-    }
-
     let computed = Arc::new(Mutex::new(HashSet::<BlameId>::new()));
 
-    blametrees
-        .into_iter()
-        .par_bridge()
-        .try_for_each(|blametree| {
-            compute_blames_for_blametree(data, repo, mp.clone(), computed.clone(), blametree)?;
-            pb.inc(1);
-            Ok::<_, anyhow::Error>(())
-        })?;
+    commits.iter().par_bridge().try_for_each(|commit| {
+        let blametree = data.load_blametree_uncached(commit.hash.clone())?;
+        compute_blames_for_blametree(data, repo, mp.clone(), computed.clone(), blametree)?;
+        pb.inc(1);
+        Ok::<_, anyhow::Error>(())
+    })?;
 
     pb.finish();
     Ok(())

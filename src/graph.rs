@@ -29,9 +29,9 @@ fn count_authors(
 ) -> anyhow::Result<HashMap<String, u64>> {
     let mut count = HashMap::<String, u64>::new();
     for blame_id in blametree.blames {
-        let blame = data.load_blame(&blame_id)?;
+        let blame = data.load_blame_cached(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
-            let info = data.load_commit(hash.clone())?;
+            let info = data.load_commit_cached(hash.clone())?;
             let author = authors.get(&info.author_mail);
             *count.entry(author).or_default() += amount;
         }
@@ -40,10 +40,10 @@ fn count_authors(
 }
 
 pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
-    let log = data.load_log()?;
+    let log = data.load_log_uncached()?;
     let hash = common::first_hash(&log, hash)?;
-    let blametree = data.load_blametree(hash)?;
-    let authors = data.load_authors()?;
+    let blametree = data.load_blametree_cached(hash)?;
+    let authors = data.load_authors_uncached()?;
 
     let count = count_authors(data, &authors, blametree)?;
     let mut count = count.into_iter().map(|(a, n)| (n, a)).collect::<Vec<_>>();
@@ -60,9 +60,9 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
 
 pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading basic info");
-    let log = data.load_log()?;
+    let log = data.load_log_uncached()?;
     let tz = TimeZone::system();
-    let authors = data.load_authors()?;
+    let authors = data.load_authors_uncached()?;
 
     let mut commits = common::load_commits(data, log)?;
     common::order_for_equidistance(&tz, &mut commits);
@@ -70,7 +70,7 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     let pb = progress::counting_bar("Loading blames", commits.len());
     let mut counts = vec![];
     for commit in commits {
-        let blametree = data.load_blametree(commit.hash.clone())?;
+        let blametree = data.load_blametree_cached(commit.hash.clone())?;
         let Ok(count) = count_authors(data, &authors, blametree) else {
             break;
         };
@@ -133,9 +133,9 @@ fn count_years(
 ) -> anyhow::Result<HashMap<i16, u64>> {
     let mut count = HashMap::<i16, u64>::new();
     for blame_id in blametree.blames {
-        let blame = data.load_blame(&blame_id)?;
+        let blame = data.load_blame_cached(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
-            let info = data.load_commit(hash.clone())?;
+            let info = data.load_commit_cached(hash.clone())?;
             let year = tz.to_datetime(info.author_time).year();
             *count.entry(year).or_default() += amount;
         }
@@ -144,9 +144,9 @@ fn count_years(
 }
 
 pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
-    let log = data.load_log()?;
+    let log = data.load_log_uncached()?;
     let hash = common::first_hash(&log, hash)?;
-    let blametree = data.load_blametree(hash)?;
+    let blametree = data.load_blametree_cached(hash)?;
     let tz = TimeZone::system();
 
     let count = count_years(data, &tz, blametree)?;
@@ -165,7 +165,7 @@ pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> 
 
 pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading basic info");
-    let log = data.load_log()?;
+    let log = data.load_log_uncached()?;
     let tz = TimeZone::system();
 
     let mut commits = common::load_commits(data, log)?;
@@ -174,7 +174,7 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
     let pb = progress::counting_bar("Loading blames", commits.len());
     let mut counts = vec![];
     for commit in commits {
-        let blametree = data.load_blametree(commit.hash.clone())?;
+        let blametree = data.load_blametree_cached(commit.hash.clone())?;
         let Ok(count) = count_years(data, &tz, blametree) else {
             break;
         };

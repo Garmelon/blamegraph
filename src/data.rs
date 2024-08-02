@@ -67,11 +67,11 @@ impl Data {
         }
     }
 
-    fn load_data<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
+    fn load_data_uncached<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
         Ok(bincode::deserialize(&fs::read(path)?)?)
     }
 
-    fn load_data_with_cache<T: Clone + DeserializeOwned>(
+    fn load_data_cached<T: Clone + DeserializeOwned>(
         cache: &mut LruCache<String, T>,
         path: &Path,
         key: String,
@@ -80,8 +80,8 @@ impl Data {
             return Ok(value.clone());
         }
 
-        let value =
-            Self::load_data::<T>(path).context(format!("failed to load {}", path.display()))?;
+        let value = Self::load_data_uncached::<T>(path)
+            .context(format!("failed to load {}", path.display()))?;
         cache.push(key, value.clone());
         Ok(value)
     }
@@ -102,11 +102,11 @@ impl Data {
         Self::save_data(path, value)
     }
 
-    pub fn load_ignore() -> anyhow::Result<()> {
+    pub fn load_ignore_uncached() -> anyhow::Result<()> {
         todo!()
     }
 
-    pub fn load_authors(&self) -> anyhow::Result<Authors> {
+    pub fn load_authors_uncached(&self) -> anyhow::Result<Authors> {
         let path = path_authors(&self.dir);
         let authors = match fs::read_to_string(&path) {
             Ok(s) => toml::from_str::<Authors>(&s)?,
@@ -117,7 +117,7 @@ impl Data {
         Ok(authors)
     }
 
-    pub fn load_log(&self) -> anyhow::Result<Vec<String>> {
+    pub fn load_log_uncached(&self) -> anyhow::Result<Vec<String>> {
         let path = path_log(&self.dir);
         let log = match fs::read(&path) {
             Ok(s) => bincode::deserialize::<Vec<String>>(&s)?,
@@ -132,9 +132,9 @@ impl Data {
         Self::save_data(&path, log).context(format!("failed to save log to {}", path.display()))
     }
 
-    pub fn load_commit(&mut self, hash: String) -> anyhow::Result<Commit> {
+    pub fn load_commit_cached(&mut self, hash: String) -> anyhow::Result<Commit> {
         let path = path_commit(&self.dir, &hash);
-        Self::load_data_with_cache(&mut self.commit_cache, &path, hash)
+        Self::load_data_cached(&mut self.commit_cache, &path, hash)
     }
 
     pub fn save_commit(&self, commit: &Commit) -> anyhow::Result<()> {
@@ -146,9 +146,14 @@ impl Data {
         path_blametree(&self.dir, &hash).exists()
     }
 
-    pub fn load_blametree(&mut self, hash: String) -> anyhow::Result<BlameTree> {
+    pub fn load_blametree_cached(&mut self, hash: String) -> anyhow::Result<BlameTree> {
         let path = path_blametree(&self.dir, &hash);
-        Self::load_data_with_cache(&mut self.blametree_cache, &path, hash)
+        Self::load_data_cached(&mut self.blametree_cache, &path, hash)
+    }
+
+    pub fn load_blametree_uncached(&self, hash: String) -> anyhow::Result<BlameTree> {
+        let path = path_blametree(&self.dir, &hash);
+        Self::load_data_uncached(&path)
     }
 
     pub fn save_blametree(&self, blametree: &BlameTree) -> anyhow::Result<()> {
@@ -160,9 +165,9 @@ impl Data {
         path_blame(&self.dir, &id.sha256()).exists()
     }
 
-    pub fn load_blame(&mut self, id: &BlameId) -> anyhow::Result<Blame> {
+    pub fn load_blame_cached(&mut self, id: &BlameId) -> anyhow::Result<Blame> {
         let path = path_blame(&self.dir, &id.sha256());
-        Self::load_data_with_cache(&mut self.blame_cache, &path, id.sha256())
+        Self::load_data_cached(&mut self.blame_cache, &path, id.sha256())
     }
 
     pub fn save_blame(&self, blame: &Blame) -> anyhow::Result<()> {
