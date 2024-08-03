@@ -22,6 +22,7 @@ use std::{
 };
 
 use anyhow::Context;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use lru::LruCache;
 use serde::{de::DeserializeOwned, Serialize};
 use tempfile::NamedTempFile;
@@ -29,6 +30,10 @@ use tempfile::NamedTempFile;
 pub use self::{authors::*, blame::*, commit::*};
 
 const EXTENSION: &str = "bin";
+
+fn path_ignore(dir: &Path) -> PathBuf {
+    dir.join("ignore")
+}
 
 fn path_authors(dir: &Path) -> PathBuf {
     dir.join("authors.toml")
@@ -114,8 +119,16 @@ impl Data {
         Self::save_data(path, value)
     }
 
-    pub fn load_ignore_uncached() -> anyhow::Result<()> {
-        todo!()
+    pub fn load_ignore_uncached(&self) -> anyhow::Result<Gitignore> {
+        let mut builder = GitignoreBuilder::new(PathBuf::new());
+        match builder.add(path_ignore(&self.dir)) {
+            // Very likely just a "file not found" error
+            Some(ignore::Error::WithPath { .. }) => Ok(()),
+            Some(e) => Err(e),
+            None => Ok(()),
+        }?;
+        let ignore = builder.build()?;
+        Ok(ignore)
     }
 
     pub fn load_authors_uncached(&self) -> anyhow::Result<Authors> {

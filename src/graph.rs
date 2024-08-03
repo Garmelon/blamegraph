@@ -9,6 +9,7 @@ use std::{
 };
 
 use graph::Graph;
+use ignore::gitignore::Gitignore;
 use jiff::tz::TimeZone;
 use series::Series;
 use unicode_width::UnicodeWidthStr;
@@ -24,11 +25,19 @@ use crate::{
 
 fn count_authors(
     data: &mut Data,
+    ignore: &Gitignore,
     authors: &Authors,
     blametree: BlameTree,
 ) -> anyhow::Result<HashMap<String, u64>> {
     let mut count = HashMap::<String, u64>::new();
     for blame_id in blametree.blames {
+        if ignore
+            .matched_path_or_any_parents(&blame_id.path, false)
+            .is_ignore()
+        {
+            continue;
+        }
+
         let blame = data.load_blame_cached(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit_cached(hash.clone())?;
@@ -43,9 +52,10 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
     let log = data.load_log_uncached()?;
     let hash = common::first_hash(&log, hash)?;
     let blametree = data.load_blametree_cached(hash)?;
+    let ignore = data.load_ignore_uncached()?;
     let authors = data.load_authors_uncached()?;
 
-    let count = count_authors(data, &authors, blametree)?;
+    let count = count_authors(data, &ignore, &authors, blametree)?;
     let mut count = count.into_iter().map(|(a, n)| (n, a)).collect::<Vec<_>>();
     count.sort_unstable();
 
@@ -61,8 +71,9 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
 pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading basic info");
     let log = data.load_log_uncached()?;
-    let tz = TimeZone::system();
+    let ignore = data.load_ignore_uncached()?;
     let authors = data.load_authors_uncached()?;
+    let tz = TimeZone::system();
 
     let mut commits = common::load_commits(data, log)?;
     common::order_for_equidistance(&tz, &mut commits);
@@ -71,7 +82,7 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     let mut counts = vec![];
     for commit in commits {
         let blametree = data.load_blametree_cached(commit.hash.clone())?;
-        let Ok(count) = count_authors(data, &authors, blametree) else {
+        let Ok(count) = count_authors(data, &ignore, &authors, blametree) else {
             break;
         };
         counts.push((commit, count));
@@ -137,11 +148,19 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
 
 fn count_years(
     data: &mut Data,
+    ignore: &Gitignore,
     tz: &TimeZone,
     blametree: BlameTree,
 ) -> anyhow::Result<HashMap<i16, u64>> {
     let mut count = HashMap::<i16, u64>::new();
     for blame_id in blametree.blames {
+        if ignore
+            .matched_path_or_any_parents(&blame_id.path, false)
+            .is_ignore()
+        {
+            continue;
+        }
+
         let blame = data.load_blame_cached(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit_cached(hash.clone())?;
@@ -156,9 +175,10 @@ pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> 
     let log = data.load_log_uncached()?;
     let hash = common::first_hash(&log, hash)?;
     let blametree = data.load_blametree_cached(hash)?;
+    let ignore = data.load_ignore_uncached()?;
     let tz = TimeZone::system();
 
-    let count = count_years(data, &tz, blametree)?;
+    let count = count_years(data, &ignore, &tz, blametree)?;
     let mut count = count.into_iter().collect::<Vec<_>>();
     count.sort_unstable();
 
@@ -175,6 +195,7 @@ pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> 
 pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
     println!("Loading basic info");
     let log = data.load_log_uncached()?;
+    let ignore = data.load_ignore_uncached()?;
     let tz = TimeZone::system();
 
     let mut commits = common::load_commits(data, log)?;
@@ -184,7 +205,7 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
     let mut counts = vec![];
     for commit in commits {
         let blametree = data.load_blametree_cached(commit.hash.clone())?;
-        let Ok(count) = count_years(data, &tz, blametree) else {
+        let Ok(count) = count_years(data, &ignore, &tz, blametree) else {
             break;
         };
         counts.push((commit, count));

@@ -11,6 +11,7 @@ clap = { version = "4.5.11", features = [
     "deprecated",
     "unstable-v5",
 ] }
+ignore = "0.4.22"
 # Contains https://github.com/console-rs/indicatif/pull/648
 indicatif = { git = "https://github.com/console-rs/indicatif.git", rev = "529531726fca07e0a624462838104388e89d029d" }
 jiff = { version = "0.1.1", features = ["serde"] }
