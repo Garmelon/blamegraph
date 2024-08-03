@@ -11,11 +11,12 @@ use std::{
 use graph::Graph;
 use ignore::gitignore::Gitignore;
 use jiff::tz::TimeZone;
+use lru::LruCache;
 use series::Series;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    data::{Authors, BlameTree, Data},
+    data::{Authors, BlameId, BlameTree, Data},
     progress, OutFormat,
 };
 
@@ -25,6 +26,7 @@ use crate::{
 
 fn count_authors(
     data: &mut Data,
+    count_cache: &mut LruCache<BlameId, HashMap<String, u64>>,
     ignore: &Gitignore,
     authors: &Authors,
     blametree: BlameTree,
@@ -38,12 +40,22 @@ fn count_authors(
             continue;
         }
 
+        if let Some(cached_count) = count_cache.get(&blame_id) {
+            for (author, amount) in cached_count {
+                *count.entry(author.clone()).or_default() += amount;
+            }
+            continue;
+        }
+
+        let mut cached_count = HashMap::new();
         let blame = data.load_blame_cached(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit_cached(hash.clone())?;
             let author = authors.get(&info.author_mail);
-            *count.entry(author).or_default() += amount;
+            *count.entry(author.clone()).or_default() += amount;
+            *cached_count.entry(author).or_default() += amount;
         }
+        count_cache.put(blame_id, cached_count);
     }
     Ok(count)
 }
@@ -55,7 +67,8 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
     let ignore = data.load_ignore_uncached()?;
     let authors = data.load_authors_uncached()?;
 
-    let count = count_authors(data, &ignore, &authors, blametree)?;
+    let mut cache = LruCache::new(10000.try_into().unwrap());
+    let count = count_authors(data, &mut cache, &ignore, &authors, blametree)?;
     let mut count = count.into_iter().map(|(a, n)| (n, a)).collect::<Vec<_>>();
     count.sort_unstable();
 
@@ -79,10 +92,11 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     common::order_for_equidistance(&tz, &mut commits);
 
     let pb = progress::counting_bar("Loading blames", commits.len());
+    let mut cache = LruCache::new(10000.try_into().unwrap());
     let mut counts = vec![];
     for commit in commits {
         let blametree = data.load_blametree_cached(commit.hash.clone())?;
-        let Ok(count) = count_authors(data, &ignore, &authors, blametree) else {
+        let Ok(count) = count_authors(data, &mut cache, &ignore, &authors, blametree) else {
             break;
         };
         counts.push((commit, count));
@@ -148,6 +162,7 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
 
 fn count_years(
     data: &mut Data,
+    count_cache: &mut LruCache<BlameId, HashMap<i16, u64>>,
     ignore: &Gitignore,
     tz: &TimeZone,
     blametree: BlameTree,
@@ -161,12 +176,22 @@ fn count_years(
             continue;
         }
 
+        if let Some(cached_count) = count_cache.get(&blame_id) {
+            for (year, amount) in cached_count {
+                *count.entry(*year).or_default() += amount;
+            }
+            continue;
+        }
+
+        let mut cached_count = HashMap::new();
         let blame = data.load_blame_cached(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit_cached(hash.clone())?;
             let year = tz.to_datetime(info.author_time).year();
             *count.entry(year).or_default() += amount;
+            *cached_count.entry(year).or_default() += amount;
         }
+        count_cache.put(blame_id, cached_count);
     }
     Ok(count)
 }
@@ -178,7 +203,8 @@ pub fn print_years(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> 
     let ignore = data.load_ignore_uncached()?;
     let tz = TimeZone::system();
 
-    let count = count_years(data, &ignore, &tz, blametree)?;
+    let mut cache = LruCache::new(10000.try_into().unwrap());
+    let count = count_years(data, &mut cache, &ignore, &tz, blametree)?;
     let mut count = count.into_iter().collect::<Vec<_>>();
     count.sort_unstable();
 
@@ -202,10 +228,11 @@ pub fn graph_years(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow
     common::order_for_equidistance(&tz, &mut commits);
 
     let pb = progress::counting_bar("Loading blames", commits.len());
+    let mut cache = LruCache::new(10000.try_into().unwrap());
     let mut counts = vec![];
     for commit in commits {
         let blametree = data.load_blametree_cached(commit.hash.clone())?;
-        let Ok(count) = count_years(data, &ignore, &tz, blametree) else {
+        let Ok(count) = count_years(data, &mut cache, &ignore, &tz, blametree) else {
             break;
         };
         counts.push((commit, count));
