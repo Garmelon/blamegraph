@@ -149,10 +149,16 @@ pub fn graph_authors(
     series.sort_unstable_by_key(|s| total_by_author.get(&s.name).unwrap());
     series.reverse();
 
-    if series.len() > 50 {
+    let max_series = 50;
+    let real_authors = max_series - 1;
+    if series.len() > max_series {
         let mut misc_authors = series.pop().unwrap();
-        misc_authors.name = "Misc authors".to_string();
-        while series.len() > 49 {
+        let n_misc_authors = series.len() - real_authors;
+        misc_authors.name = format!(
+            "{n_misc_authors} misc. author{}",
+            if n_misc_authors == 1 { "" } else { "s" }
+        );
+        while series.len() > real_authors {
             misc_authors.add(&series.pop().unwrap());
         }
         series.push(misc_authors);
