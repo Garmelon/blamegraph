@@ -39,15 +39,27 @@ fn path_log(dir: &Path) -> PathBuf {
 }
 
 fn path_commit(dir: &Path, hash: &str) -> PathBuf {
-    dir.join("commits").join(hash).with_extension(EXTENSION)
+    let first_two_chars = hash.split_at(2).0;
+    dir.join("commits")
+        .join(first_two_chars)
+        .join(hash)
+        .with_extension(EXTENSION)
 }
 
 fn path_blametree(dir: &Path, hash: &str) -> PathBuf {
-    dir.join("blametrees").join(hash).with_extension(EXTENSION)
+    let first_two_chars = hash.split_at(2).0;
+    dir.join("blametrees")
+        .join(first_two_chars)
+        .join(hash)
+        .with_extension(EXTENSION)
 }
 
 fn path_blame(dir: &Path, hash: &str) -> PathBuf {
-    dir.join("blames").join(hash).with_extension(EXTENSION)
+    let first_two_chars = hash.split_at(2).0;
+    dir.join("blames")
+        .join(first_two_chars)
+        .join(hash)
+        .with_extension(EXTENSION)
 }
 
 pub struct Data {
