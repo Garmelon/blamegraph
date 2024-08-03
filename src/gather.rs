@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
+use ignore::gitignore::Gitignore;
 use indicatif::{MultiProgress, ProgressDrawTarget};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 
@@ -107,6 +108,7 @@ fn compute_blametrees(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyho
 fn compute_blames_for_blametree(
     data: &Data,
     repo: &Path,
+    ignore: &Gitignore,
     mp: MultiProgress,
     computed: Arc<Mutex<HashSet<BlameId>>>,
     blametree: BlameTree,
@@ -117,6 +119,13 @@ fn compute_blames_for_blametree(
     ));
 
     for blame_id in blametree.blames {
+        if ignore
+            .matched_path_or_any_parents(&blame_id.path, false)
+            .is_ignore()
+        {
+            continue;
+        }
+
         if !computed.lock().unwrap().insert(blame_id.clone()) {
             pb.inc(1);
             continue;
@@ -140,7 +149,12 @@ fn compute_blames_for_blametree(
     Ok(())
 }
 
-fn compute_blames(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyhow::Result<()> {
+fn compute_blames(
+    data: &mut Data,
+    repo: &Path,
+    ignore: &Gitignore,
+    commits: &[Commit],
+) -> anyhow::Result<()> {
     println!();
     let mp = MultiProgress::with_draw_target(ProgressDrawTarget::stdout_with_hz(5));
     mp.set_move_cursor(true);
@@ -152,7 +166,7 @@ fn compute_blames(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyhow::R
 
     commits.iter().par_bridge().try_for_each(|commit| {
         let blametree = data.load_blametree_uncached(commit.hash.clone())?;
-        compute_blames_for_blametree(data, repo, mp.clone(), computed.clone(), blametree)?;
+        compute_blames_for_blametree(data, repo, ignore, mp.clone(), computed.clone(), blametree)?;
         pb.inc(1);
         Ok::<_, anyhow::Error>(())
     })?;
@@ -162,10 +176,11 @@ fn compute_blames(data: &mut Data, repo: &Path, commits: &[Commit]) -> anyhow::R
 }
 
 pub fn gather(data: &mut Data, repo: &Path) -> anyhow::Result<()> {
+    let ignore = data.load_ignore_uncached()?;
     let commits = search_for_commits(repo)?;
     save_commits(data, &commits)?;
     save_log(data, &commits)?;
     compute_blametrees(data, repo, &commits)?;
-    compute_blames(data, repo, &commits)?;
+    compute_blames(data, repo, &ignore, &commits)?;
     Ok(())
 }
