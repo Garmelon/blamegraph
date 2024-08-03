@@ -22,6 +22,8 @@ enum Command {
     },
     Authors {
         hash: Option<String>,
+        #[arg(long, short, default_value_t = false)]
+        email: bool,
     },
     Years {
         hash: Option<String>,
@@ -30,6 +32,8 @@ enum Command {
         outfile: PathBuf,
         #[arg(value_enum, default_value_t=Default::default())]
         format: OutFormat,
+        #[arg(long, short, default_value_t = false)]
+        email: bool,
     },
     GraphYears {
         outfile: PathBuf,
@@ -52,11 +56,13 @@ fn main() -> anyhow::Result<()> {
 
     match args.cmd {
         Command::Gather { repo } => gather::gather(&mut data, &repo)?,
-        Command::Authors { hash } => graph::print_authors(&mut data, hash)?,
+        Command::Authors { hash, email } => graph::print_authors(&mut data, hash, email)?,
         Command::Years { hash } => graph::print_years(&mut data, hash)?,
-        Command::GraphAuthors { outfile, format } => {
-            graph::graph_authors(&mut data, &outfile, format)?
-        }
+        Command::GraphAuthors {
+            outfile,
+            format,
+            email,
+        } => graph::graph_authors(&mut data, &outfile, format, email)?,
         Command::GraphYears { outfile, format } => graph::graph_years(&mut data, &outfile, format)?,
     }
     Ok(())

@@ -30,6 +30,7 @@ fn count_authors(
     ignore: &Gitignore,
     authors: &Authors,
     blametree: BlameTree,
+    use_email: bool,
 ) -> anyhow::Result<HashMap<String, u64>> {
     let mut count = HashMap::<String, u64>::new();
     for blame_id in blametree.blames {
@@ -51,7 +52,12 @@ fn count_authors(
         let blame = data.load_blame_cached(&blame_id)?;
         for (hash, amount) in blame.lines_by_commit {
             let info = data.load_commit_cached(hash.clone())?;
-            let author = authors.get(&info.author_mail);
+            let author = if use_email {
+                &info.author_mail
+            } else {
+                &info.author
+            };
+            let author = authors.get(author);
             *count.entry(author.clone()).or_default() += amount;
             *cached_count.entry(author).or_default() += amount;
         }
@@ -60,7 +66,7 @@ fn count_authors(
     Ok(count)
 }
 
-pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()> {
+pub fn print_authors(data: &mut Data, hash: Option<String>, use_email: bool) -> anyhow::Result<()> {
     let log = data.load_log_uncached()?;
     let hash = common::first_hash(&log, hash)?;
     let blametree = data.load_blametree_cached(hash)?;
@@ -68,7 +74,7 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
     let authors = data.load_authors_uncached()?;
 
     let mut cache = LruCache::new(10000.try_into().unwrap());
-    let count = count_authors(data, &mut cache, &ignore, &authors, blametree)?;
+    let count = count_authors(data, &mut cache, &ignore, &authors, blametree, use_email)?;
     let mut count = count.into_iter().map(|(a, n)| (n, a)).collect::<Vec<_>>();
     count.sort_unstable();
 
@@ -81,7 +87,12 @@ pub fn print_authors(data: &mut Data, hash: Option<String>) -> anyhow::Result<()
     Ok(())
 }
 
-pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyhow::Result<()> {
+pub fn graph_authors(
+    data: &mut Data,
+    outfile: &Path,
+    format: OutFormat,
+    use_email: bool,
+) -> anyhow::Result<()> {
     println!("Loading basic info");
     let log = data.load_log_uncached()?;
     let ignore = data.load_ignore_uncached()?;
@@ -96,7 +107,8 @@ pub fn graph_authors(data: &mut Data, outfile: &Path, format: OutFormat) -> anyh
     let mut counts = vec![];
     for commit in commits {
         let blametree = data.load_blametree_cached(commit.hash.clone())?;
-        let Ok(count) = count_authors(data, &mut cache, &ignore, &authors, blametree) else {
+        let Ok(count) = count_authors(data, &mut cache, &ignore, &authors, blametree, use_email)
+        else {
             break;
         };
         counts.push((commit, count));
