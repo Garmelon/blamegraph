@@ -29,14 +29,14 @@ enum Command {
         hash: Option<String>,
     },
     GraphAuthors {
-        outfile: PathBuf,
+        outfile: Option<PathBuf>,
         #[arg(value_enum, default_value_t=Default::default())]
         format: OutFormat,
         #[arg(long, short, default_value_t = false)]
         email: bool,
     },
     GraphYears {
-        outfile: PathBuf,
+        outfile: Option<PathBuf>,
         #[arg(value_enum, default_value_t=Default::default())]
         format: OutFormat,
     },
@@ -62,8 +62,14 @@ fn main() -> anyhow::Result<()> {
             outfile,
             format,
             email,
-        } => graph::graph_authors(&mut data, &outfile, format, email)?,
-        Command::GraphYears { outfile, format } => graph::graph_years(&mut data, &outfile, format)?,
+        } => {
+            let outfile = outfile.unwrap_or_else(|| data.dir.join("authors.html"));
+            graph::graph_authors(&mut data, &outfile, format, email)?
+        }
+        Command::GraphYears { outfile, format } => {
+            let outfile = outfile.unwrap_or_else(|| data.dir.join("years.html"));
+            graph::graph_years(&mut data, &outfile, format)?
+        }
     }
     Ok(())
 }

@@ -68,7 +68,7 @@ fn path_blame(dir: &Path, hash: &str) -> PathBuf {
 }
 
 pub struct Data {
-    dir: PathBuf,
+    pub dir: PathBuf,
     commit_cache: LruCache<String, Commit>,
     blametree_cache: LruCache<String, BlameTree>,
     blame_cache: LruCache<String, Blame>,
