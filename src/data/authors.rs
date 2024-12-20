@@ -6,10 +6,6 @@ use serde::{Deserialize, Serialize};
 pub struct Authors(HashMap<String, String>);
 
 impl Authors {
-    pub fn new(rename: HashMap<String, String>) -> Self {
-        Self(rename)
-    }
-
     pub fn check_for_cycles(&self) -> anyhow::Result<()> {
         for start in self.0.keys() {
             let mut cur = start;
